@@ -1,4 +1,5 @@
 name: Deploy
+# Reusable workflow for doco-cd deployments
 
 on:
   workflow_call:
