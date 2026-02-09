@@ -48,5 +48,9 @@ jobs:
             echo "No changes - already at ${{ inputs.tag }}"
           else
             git commit -m "chore(${{ github.event.repository.name }}): update to ${{ inputs.tag }}"
-            git push
+            for i in 1 2 3; do
+              git push && break
+              echo "Push failed (attempt $i), rebasing..."
+              git pull --rebase origin main
+            done
           fi
