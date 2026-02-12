@@ -28,7 +28,11 @@ run('git', ['config', 'user.email', 'github-actions[bot]@users.noreply.github.co
 if (all) {
 	run('git', ['add', '-A']);
 } else {
-	run('git', ['add', paths]);
+	try {
+		run('git', ['add', paths]);
+	} catch {
+		// path may not exist (already cleaned up), check for staged changes below
+	}
 }
 
 try {
