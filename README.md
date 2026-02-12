@@ -192,8 +192,6 @@ jobs:
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
 | `tag` | Yes | - | Image tag |
-| `domain` | No | `jaw.dev` | Base domain |
-| `data-dir` | No | `/home/jaw/data` | Base data dir (for bind mount → named volume conversion) |
 
 ### Temp Cleanup Inputs
 

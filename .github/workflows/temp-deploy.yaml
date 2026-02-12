@@ -16,14 +16,6 @@ on:
         type: string
         required: true
         description: "Image tag (e.g., abc1234)"
-      domain:
-        type: string
-        default: jaw.dev
-        description: "Base domain (e.g., jaw.dev)"
-      data-dir:
-        type: string
-        default: /home/jaw/data
-        description: "Base data directory on server"
     secrets:
       GH_TOKEN:
         required: true
@@ -62,9 +54,7 @@ jobs:
             --app-path "${{ inputs.app-path }}" \
             --tag "${{ inputs.tag }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
-            --repo-owner "${{ github.repository_owner }}" \
-            --domain "${{ inputs.domain }}" \
-            --data-dir "${{ inputs.data-dir }}"
+            --repo-owner "${{ github.repository_owner }}"
 
       - name: Commit and push
         run: |

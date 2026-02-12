@@ -18,13 +18,10 @@ const appPath = args['app-path'];
 const tag = args['tag'];
 const prNumber = args['pr-number'];
 const repoOwner = args['repo-owner'];
-const domain = args['domain'] || 'jaw.dev';
-const dataDir = args['data-dir'] || '/home/jaw/data';
 
 const appName = path.basename(appPath);
 const tempName = `${appName}-pr-${prNumber}`;
 const tempPath = `${appPath}-pr-${prNumber}`;
-const hostname = `pr-${prNumber}-${appName}.${domain}`;
 
 // Copy app directory
 fs.rmSync(tempPath, { recursive: true, force: true });
@@ -33,6 +30,29 @@ fs.cpSync(appPath, tempPath, { recursive: true });
 // Parse compose
 const composePath = path.join(tempPath, 'docker-compose.yml');
 const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
+
+// Auto-detect domain from traefik Host() labels
+let originalHost = null;
+for (const [, service] of Object.entries(doc.services)) {
+	if (!service.labels) continue;
+	for (const label of service.labels) {
+		const match = label.match(/Host\(`([^`]+)`\)/);
+		if (match) {
+			originalHost = match[1];
+			break;
+		}
+	}
+	if (originalHost) break;
+}
+
+if (!originalHost) {
+	console.error('Could not detect domain from traefik Host() labels');
+	process.exit(1);
+}
+
+// e.g. "bang.jaw.dev" → domain is "jaw.dev"
+const domain = originalHost.split('.').slice(1).join('.');
+const hostname = `pr-${prNumber}-${appName}.${domain}`;
 
 const volumeNames = new Set();
 
@@ -49,23 +69,22 @@ for (const [, service] of Object.entries(doc.services)) {
 			label
 				.replaceAll(`traefik.http.routers.${appName}`, `traefik.http.routers.${tempName}`)
 				.replaceAll(`traefik.http.services.${appName}`, `traefik.http.services.${tempName}`)
-				.replaceAll(`${appName}.${domain}`, hostname),
+				.replaceAll(originalHost, hostname),
 		);
 	}
 
-	// Convert bind mounts to named volumes
+	// Convert all bind mounts to named volumes
 	if (service.volumes) {
 		service.volumes = service.volumes.map((vol) => {
 			if (typeof vol !== 'string') return vol;
 
 			const [hostPath, ...rest] = vol.split(':');
 			const containerPath = rest.join(':');
-			const prefix = `${dataDir}/${appName}`;
 
-			if (!hostPath.startsWith(prefix)) return vol;
+			// Skip non-absolute paths (already named volumes)
+			if (!path.isAbsolute(hostPath)) return vol;
 
-			const subpath = hostPath.slice(prefix.length);
-			const volName = subpath ? `data${subpath.replaceAll('/', '-')}` : 'data';
+			const volName = hostPath.split('/').filter(Boolean).pop() || 'data';
 
 			volumeNames.add(volName);
 			return `${volName}:${containerPath}`;
