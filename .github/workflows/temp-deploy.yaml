@@ -28,6 +28,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      deployments: write
     outputs:
       url: ${{ steps.rewrite.outputs.url }}
     steps:

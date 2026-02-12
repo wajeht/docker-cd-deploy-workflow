@@ -23,6 +23,8 @@ concurrency:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    permissions:
+      deployments: write
     steps:
       - name: Checkout home-ops
         uses: actions/checkout@v4
