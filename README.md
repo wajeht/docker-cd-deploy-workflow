@@ -60,7 +60,7 @@ Add `temp-deploy` label to PR
     → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
     → Rewrites image tag, traefik labels, converts bind mounts to named volumes
     → docker-cd deploys to pr-<N>-<app>.jaw.dev
-    → Posts deploy URL as PR comment
+    → Posts/updates a single PR comment with deploy URL + timestamp
 
 Push new commits (with label present)
     → Rebuilds image with new SHA
@@ -80,8 +80,9 @@ The `src/rewrite-compose.js` script copies the full prod stack and modifies:
 - **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
 - **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
 - **docker-cd.yml** — forces `rolling_update: false`
+- **env_file** — if `.enc-temp.env` exists, appends it to `env_file` list (overrides prod values)
 
-Everything else is preserved: env_files, healthchecks, sidecars, networks, resource limits.
+Everything else is preserved: healthchecks, sidecars, networks, resource limits.
 
 ### Custom env overrides
 
