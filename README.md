@@ -25,7 +25,9 @@ Node.js (ESM), uses `js-yaml` for YAML parsing.
 |--------|---------|-------------|
 | `src/update-tag.js` | `deploy.yaml` | Updates `ghcr.io` image tag in a compose file |
 | `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites image/labels/volumes for temp env |
-| `src/utils.js` | both | Shared helpers (`parseArgs`) |
+| `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates/cleans up GitHub Deployments for "View deployment" button on PRs |
+| `src/comment.js` | - | Posts/updates PR comments (legacy, replaced by `deployment.js`) |
+| `src/utils.js` | all | Shared helpers (`parseArgs`, `createGitHubApi`) |
 
 ## Deploy
 
@@ -60,7 +62,7 @@ Add `temp-deploy` label to PR
     → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
     → Rewrites image tag, traefik labels, converts bind mounts to named volumes
     → docker-cd deploys to pr-<N>-<app>.jaw.dev
-    → Posts/updates a single PR comment with deploy URL + timestamp
+    → Creates a GitHub Deployment with "View deployment" button linking to the URL
 
 Push new commits (with label present)
     → Rebuilds image with new SHA
@@ -69,6 +71,7 @@ Push new commits (with label present)
 
 Close PR or remove label
     → Removes apps/<app>-pr-<N>/ from home-ops
+    → Cleans up GitHub Deployment
     → docker-cd garbage collects the stack
 ```
 
@@ -202,11 +205,11 @@ jobs:
 
 ## Secrets
 
-All workflows require:
+| Secret | Required by | Description |
+|--------|-------------|-------------|
+| `GH_TOKEN` | All workflows | GitHub PAT with `repo` and `packages` scope |
 
-| Secret | Description |
-|--------|-------------|
-| `GH_TOKEN` | GitHub PAT with `repo` and `packages` scope |
+GitHub Deployments use the automatic `github.token` — no extra secrets needed.
 
 ## License
 

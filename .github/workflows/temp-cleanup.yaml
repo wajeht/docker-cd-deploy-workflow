@@ -49,14 +49,13 @@ jobs:
             --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
             --message "chore(${{ github.event.repository.name }}): remove temp deploy pr-${{ github.event.pull_request.number }}"
 
-      - name: Update PR comment
-        if: github.event.action != 'closed'
+      - name: Cleanup GitHub deployment
         run: |
-          node .deploy-workflow/src/comment.js \
+          node .deploy-workflow/src/deployment.js \
             --action cleanup \
-            --token "${{ secrets.GH_TOKEN }}" \
+            --token "${{ github.token }}" \
             --repo "${{ github.repository }}" \
-            --pr-number "${{ github.event.pull_request.number }}"
+            --environment "pr-${{ github.event.pull_request.number }}"
 
       - name: Cleanup workflow scripts
         run: rm -rf .deploy-workflow

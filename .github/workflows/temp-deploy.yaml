@@ -62,15 +62,15 @@ jobs:
             --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
             --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
 
-      - name: Comment PR with deploy URL
+      - name: Create GitHub deployment
         run: |
-          node .deploy-workflow/src/comment.js \
+          node .deploy-workflow/src/deployment.js \
             --action deploy \
-            --token "${{ secrets.GH_TOKEN }}" \
+            --token "${{ github.token }}" \
             --repo "${{ github.repository }}" \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --url "${{ steps.rewrite.outputs.url }}" \
-            --tag "${{ inputs.tag }}"
+            --environment "pr-${{ github.event.pull_request.number }}" \
+            --ref "${{ github.event.pull_request.head.sha }}" \
+            --url "${{ steps.rewrite.outputs.url }}"
 
       - name: Cleanup workflow scripts
         run: rm -rf .deploy-workflow

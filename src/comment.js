@@ -1,31 +1,15 @@
-import { parseArgs } from './utils.js';
+import { parseArgs, createGitHubApi } from './utils.js';
 
 const args = parseArgs(process.argv.slice(2), { required: ['token', 'repo', 'pr-number', 'action'] });
 
-const token = args['token'];
-const repo = args['repo'];
 const prNumber = args['pr-number'];
 const action = args['action'];
 const url = args['url'];
 const tag = args['tag'];
 
+const githubApi = createGitHubApi(args['token'], args['repo']);
+
 const marker = '<!-- temp-deploy -->';
-const apiBase = `https://api.github.com/repos/${repo}`;
-const headers = {
-	Authorization: `Bearer ${token}`,
-	Accept: 'application/vnd.github+json',
-	'Content-Type': 'application/json',
-	'X-GitHub-Api-Version': '2022-11-28',
-};
-
-async function githubApi(path, options = {}) {
-	const res = await fetch(`${apiBase}${path}`, { headers, ...options });
-	if (!res.ok) {
-		throw new Error(`GitHub API ${options.method || 'GET'} ${path}: ${res.status} ${await res.text()}`);
-	}
-	return res;
-}
-
 const date = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 
 let body;
