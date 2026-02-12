@@ -101,7 +101,7 @@ jobs:
             const url = '${{ steps.rewrite.outputs.url }}';
             const tag = '${{ inputs.tag }}';
             const date = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-            const body = `${marker}\n**Temp deploy**\n\n${url}\n\nTag: \`${tag}\` | Updated: ${date}`;
+            const body = `${marker}\n🚀 **Temp deploy ready**\n\n${url}\n\nTag: \`${tag}\` | Updated: ${date}\n\n_docker-cd will pick this up within ~60s_`;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
