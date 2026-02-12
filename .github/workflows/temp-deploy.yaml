@@ -116,3 +116,17 @@ jobs:
               git pull --rebase origin main
             done
           fi
+
+      - name: Comment PR with deploy URL
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const url = '${{ steps.deploy.outputs.url }}';
+            const body = `🚀 **Temp deploy ready**\n\n${url}\n\n_docker-cd will pick this up within ~60s_`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });
