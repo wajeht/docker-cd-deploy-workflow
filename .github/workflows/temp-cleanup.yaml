@@ -1,0 +1,68 @@
+name: Temp Cleanup
+# Reusable workflow to remove temporary PR deployments
+
+on:
+  workflow_call:
+    inputs:
+      home-ops-repo:
+        type: string
+        default: wajeht/home-ops
+      app-path:
+        type: string
+        required: true
+        description: "Base app path (e.g., apps/bang)"
+    secrets:
+      GH_TOKEN:
+        required: true
+        description: "GitHub PAT with repo and packages access"
+
+concurrency:
+  group: deploy-home-ops
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout home-ops
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.home-ops-repo }}
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Remove temp stack
+        env:
+          APP_PATH: ${{ inputs.app-path }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          TEMP_PATH="${APP_PATH}-pr-${PR_NUMBER}"
+
+          if [ ! -d "$TEMP_PATH" ]; then
+            echo "Temp stack ${TEMP_PATH} does not exist, nothing to clean up"
+            exit 0
+          fi
+
+          rm -rf "$TEMP_PATH"
+          echo "Removed temp stack at ${TEMP_PATH}"
+
+      - name: Commit and push
+        env:
+          APP_PATH: ${{ inputs.app-path }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          TEMP_PATH="${APP_PATH}-pr-${PR_NUMBER}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "chore(${REPO_NAME}): remove temp deploy pr-${PR_NUMBER}"
+            for i in 1 2 3; do
+              git push && break
+              echo "Push failed (attempt $i), rebasing..."
+              git pull --rebase origin main
+            done
+          fi

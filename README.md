@@ -51,6 +51,65 @@ jobs:
 
 Concurrent deploys from different app repos are serialized to prevent push races.
 
+## Temp Deploys
+
+Temporary PR-based deployments. Add `temp-deploy` label to a PR → deploys to `pr-<N>-<app>.jaw.dev`. Close PR or remove label → auto-cleanup.
+
+### Setup (in app repo CI)
+
+```yaml
+on:
+  pull_request:
+    types: [labeled, closed, unlabeled]
+
+jobs:
+  build:
+    if: github.event.action == 'labeled' && github.event.label.name == 'temp-deploy'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.TAG }}
+    steps:
+      # ... build and push image ...
+
+  temp-deploy:
+    if: github.event.action == 'labeled' && github.event.label.name == 'temp-deploy'
+    needs: build
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@main
+    with:
+      app-path: apps/your-app
+      tag: ${{ needs.build.outputs.tag }}
+      port: "3000"
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  temp-cleanup:
+    if: >
+      github.event.action == 'closed' ||
+      (github.event.action == 'unlabeled' && github.event.label.name == 'temp-deploy')
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@main
+    with:
+      app-path: apps/your-app
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+```
+
+### Temp Deploy Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
+| `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
+| `tag` | Yes | - | Image tag |
+| `domain` | No | `jaw.dev` | Base domain |
+| `port` | Yes | - | Container port for traefik |
+
+### Temp Cleanup Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
+| `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
+
 ## License
 
 MIT
