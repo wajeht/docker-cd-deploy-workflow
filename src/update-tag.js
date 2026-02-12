@@ -1,5 +1,7 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { parseArgs } from './utils.js';
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -11,12 +13,10 @@ for (const key of required) {
 	}
 }
 
-const appPath = args['app-path'];
-const tag = args['tag'];
-const repo = args['repo'];
+const { 'app-path': appPath, tag, repo } = args;
 
 const composePath = path.join(appPath, 'docker-compose.yml');
-let content = fs.readFileSync(composePath, 'utf8');
+const content = fs.readFileSync(composePath, 'utf8');
 
 const pattern = new RegExp(`(image:\\s*ghcr\\.io/${repo}):.*`, 'g');
 const updated = content.replace(pattern, `$1:${tag}`);
@@ -28,15 +28,3 @@ if (updated === content) {
 
 fs.writeFileSync(composePath, updated);
 console.log(`Updated ghcr.io/${repo} to tag ${tag} in ${composePath}`);
-
-function parseArgs(argv) {
-	const result = {};
-	for (let i = 0; i < argv.length; i++) {
-		if (argv[i].startsWith('--')) {
-			const key = argv[i].slice(2);
-			const val = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : true;
-			result[key] = val;
-		}
-	}
-	return result;
-}

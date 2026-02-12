@@ -1,6 +1,8 @@
-const fs = require('fs');
-const yaml = require('js-yaml');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+import yaml from 'js-yaml';
+
+import { parseArgs } from './utils.js';
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -36,19 +38,19 @@ const volumeNames = new Set();
 
 for (const [, service] of Object.entries(doc.services)) {
 	// Rewrite our ghcr.io image tag
-	if (service.image && service.image.startsWith(`ghcr.io/${repoOwner}/`)) {
+	if (service.image?.startsWith(`ghcr.io/${repoOwner}/`)) {
 		const imageName = service.image.split(':')[0];
 		service.image = `${imageName}:${tag}`;
 	}
 
 	// Rewrite traefik labels
 	if (service.labels) {
-		service.labels = service.labels.map((label) => {
-			return label
+		service.labels = service.labels.map((label) =>
+			label
 				.replaceAll(`traefik.http.routers.${appName}`, `traefik.http.routers.${tempName}`)
 				.replaceAll(`traefik.http.services.${appName}`, `traefik.http.services.${tempName}`)
-				.replaceAll(`${appName}.${domain}`, hostname);
-		});
+				.replaceAll(`${appName}.${domain}`, hostname),
+		);
 	}
 
 	// Convert bind mounts to named volumes
@@ -62,8 +64,6 @@ for (const [, service] of Object.entries(doc.services)) {
 
 			if (!hostPath.startsWith(prefix)) return vol;
 
-			// /home/jaw/data/bang → data
-			// /home/jaw/data/bang/subdir → data-subdir
 			const subpath = hostPath.slice(prefix.length);
 			const volName = subpath ? `data${subpath.replaceAll('/', '-')}` : 'data';
 
@@ -112,16 +112,4 @@ const outputFile = process.env.GITHUB_OUTPUT;
 if (outputFile) {
 	fs.appendFileSync(outputFile, `url=https://${hostname}\n`);
 	fs.appendFileSync(outputFile, `temp-path=${tempPath}\n`);
-}
-
-function parseArgs(argv) {
-	const result = {};
-	for (let i = 0; i < argv.length; i++) {
-		if (argv[i].startsWith('--')) {
-			const key = argv[i].slice(2);
-			const val = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : true;
-			result[key] = val;
-		}
-	}
-	return result;
 }
