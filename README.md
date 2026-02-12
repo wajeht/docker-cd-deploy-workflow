@@ -58,19 +58,22 @@ Temporary PR-based deployments. Gives each PR its own live environment.
 ```
 Add `temp-deploy` label to PR
     → Builds image from PR branch
-    → Creates apps/<app>-pr-<N>/ in home-ops
+    → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
+    → Rewrites image tag, traefik labels, volume paths
     → docker-cd deploys to pr-<N>-<app>.jaw.dev
     → Posts deploy URL as PR comment
 
 Push new commits to PR (with label)
     → Rebuilds image with new SHA
-    → Updates temp stack in home-ops
+    → Updates temp stack with new image
     → docker-cd redeploys
 
 Close PR or remove label
     → Removes apps/<app>-pr-<N>/ from home-ops
     → docker-cd garbage collects the stack
 ```
+
+The temp stack is a full copy of the prod stack — databases, env_files, healthchecks, sidecars all included. Volume paths are rewritten (e.g., `~/data/bang` → `~/data/bang-pr-174`) so temp data is isolated from prod.
 
 ### Prerequisites
 
@@ -140,7 +143,6 @@ jobs:
     with:
       app-path: apps/your-app    # change this
       tag: ${{ needs.temp-build.outputs.tag }}
-      port: "3000"               # change this to your container port
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
@@ -164,7 +166,7 @@ jobs:
 | `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
 | `tag` | Yes | - | Image tag |
 | `domain` | No | `jaw.dev` | Base domain |
-| `port` | Yes | - | Container port for traefik |
+| `data-dir` | No | `/home/jaw/data` | Base data directory on server |
 
 ### Temp Cleanup Inputs
 

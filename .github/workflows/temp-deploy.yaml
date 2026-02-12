@@ -1,6 +1,6 @@
 name: Temp Deploy
 # Reusable workflow for temporary PR deployments
-# Creates apps/<app>-pr-<N>/ in home-ops with modified traefik labels
+# Copies existing app stack from home-ops, rewrites image tag + traefik labels + volume paths
 
 on:
   workflow_call:
@@ -19,11 +19,11 @@ on:
       domain:
         type: string
         default: jaw.dev
-        description: "Base domain for temp deploy (e.g., jaw.dev)"
-      port:
+        description: "Base domain (e.g., jaw.dev)"
+      data-dir:
         type: string
-        required: true
-        description: "Container port for traefik loadbalancer"
+        default: /home/jaw/data
+        description: "Base data directory on server"
     secrets:
       GH_TOKEN:
         required: true
@@ -51,48 +51,41 @@ jobs:
           APP_PATH: ${{ inputs.app-path }}
           TAG: ${{ inputs.tag }}
           DOMAIN: ${{ inputs.domain }}
-          PORT: ${{ inputs.port }}
+          DATA_DIR: ${{ inputs.data-dir }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           APP_NAME=$(basename "$APP_PATH")
           TEMP_NAME="${APP_NAME}-pr-${PR_NUMBER}"
           TEMP_PATH="${APP_PATH}-pr-${PR_NUMBER}"
           HOSTNAME="pr-${PR_NUMBER}-${APP_NAME}.${DOMAIN}"
-          IMAGE="ghcr.io/${REPO}:${TAG}"
 
-          mkdir -p "$TEMP_PATH"
+          # Copy entire app directory (compose, .enc.env, docker-cd.yml, etc.)
+          rm -rf "$TEMP_PATH"
+          cp -r "$APP_PATH" "$TEMP_PATH"
+          cd "$TEMP_PATH"
 
-          cat > "${TEMP_PATH}/docker-compose.yml" << EOF
-          services:
-            ${APP_NAME}:
-              image: ${IMAGE}
-              networks:
-                - traefik
-              labels:
-                - "traefik.enable=true"
-                - "traefik.http.routers.${TEMP_NAME}.rule=Host(\`${HOSTNAME}\`)"
-                - "traefik.http.routers.${TEMP_NAME}.entrypoints=websecure"
-                - "traefik.http.services.${TEMP_NAME}.loadbalancer.server.port=${PORT}"
-              restart: unless-stopped
+          # Update image tag (only our own ghcr.io images, not third-party)
+          sed -i "s|\(image: ghcr.io/${REPO_OWNER}/[^:]*\):.*|\1:${TAG}|" docker-compose.yml
 
-          networks:
-            traefik:
-              external: true
-          EOF
+          # Rewrite traefik router/service names to avoid conflicts with prod
+          sed -i "s|traefik\.http\.routers\.${APP_NAME}|traefik.http.routers.${TEMP_NAME}|g" docker-compose.yml
+          sed -i "s|traefik\.http\.services\.${APP_NAME}|traefik.http.services.${TEMP_NAME}|g" docker-compose.yml
 
-          # remove leading whitespace from heredoc
-          sed -i 's/^          //' "${TEMP_PATH}/docker-compose.yml"
+          # Rewrite hostname
+          sed -i "s|${APP_NAME}\.${DOMAIN}|${HOSTNAME}|g" docker-compose.yml
 
-          # disable rolling for temp deploys
-          cat > "${TEMP_PATH}/docker-cd.yml" << EOF
-          rolling_update: false
-          EOF
-          sed -i 's/^          //' "${TEMP_PATH}/docker-cd.yml"
+          # Isolate data volumes so temp doesn't corrupt prod
+          sed -i "s|${DATA_DIR}/${APP_NAME}|${DATA_DIR}/${TEMP_NAME}|g" docker-compose.yml
+
+          # Force no rolling update for temp deploys
+          echo "rolling_update: false" > docker-cd.yml
 
           echo "url=https://${HOSTNAME}" >> "$GITHUB_OUTPUT"
           echo "Created temp stack at ${TEMP_PATH}"
           echo "URL: https://${HOSTNAME}"
+          echo "--- docker-compose.yml ---"
+          cat docker-compose.yml
 
       - name: Commit and push
         env:
@@ -123,7 +116,7 @@ jobs:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
             const url = '${{ steps.deploy.outputs.url }}';
-            const body = `🚀 **Temp deploy ready**\n\n${url}\n\n_docker-cd will pick this up within ~60s_`;
+            const body = `**Temp deploy ready**\n\n${url}\n\n_docker-cd will pick this up within ~60s_`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
