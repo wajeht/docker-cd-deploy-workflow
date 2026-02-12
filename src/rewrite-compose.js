@@ -81,6 +81,21 @@ if (volumeNames.size > 0) {
 	}
 }
 
+// If .enc-temp.env exists, add it to env_file list (overrides .enc.env values)
+const tempEnvFile = '.enc-temp.env';
+if (fs.existsSync(path.join(tempPath, tempEnvFile))) {
+	for (const [, service] of Object.entries(doc.services)) {
+		if (service.env_file) {
+			const files = Array.isArray(service.env_file) ? service.env_file : [service.env_file];
+			if (!files.includes(tempEnvFile)) {
+				files.push(tempEnvFile);
+			}
+			service.env_file = files;
+		}
+	}
+	console.log('Added .enc-temp.env to env_file list');
+}
+
 // Write modified compose
 fs.writeFileSync(composePath, yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false }));
 
