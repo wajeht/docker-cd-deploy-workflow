@@ -1,13 +1,8 @@
 import { execFileSync } from 'node:child_process';
-
 import { parseArgs } from './utils.js';
 
-const args = parseArgs(process.argv.slice(2));
+const args = parseArgs(process.argv.slice(2), { required: ['message'] });
 
-if (!args['message']) {
-	console.error('Missing required arg: --message');
-	process.exit(1);
-}
 if (!args['paths'] && !args['all']) {
 	console.error('Missing required arg: --paths or --all');
 	process.exit(1);
@@ -49,8 +44,12 @@ for (let i = 1; i <= 3; i++) {
 	try {
 		run('git', ['push']);
 		break;
-	} catch {
-		console.log(`Push failed (attempt ${i}), rebasing...`);
+	} catch (err) {
+		if (i === 3) {
+			console.error('Push failed after 3 attempts');
+			process.exit(1);
+		}
+		console.log(`Push failed (attempt ${i}/3), rebasing...`);
 		run('git', ['pull', '--rebase', 'origin', 'main']);
 	}
 }

@@ -1,18 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-
 import { parseArgs } from './utils.js';
 
-const args = parseArgs(process.argv.slice(2));
-
-const required = ['app-path', 'tag', 'pr-number', 'repo-owner'];
-for (const key of required) {
-	if (!args[key]) {
-		console.error(`Missing required arg: --${key}`);
-		process.exit(1);
-	}
-}
+const args = parseArgs(process.argv.slice(2), { required: ['app-path', 'tag', 'pr-number', 'repo-owner'] });
 
 const appPath = args['app-path'];
 const tag = args['tag'];
