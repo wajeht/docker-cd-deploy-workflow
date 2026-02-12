@@ -1,19 +1,16 @@
 {
   "name": "docker-cd-deploy-workflow",
   "version": "1.0.0",
-  "description": "Reusable GitHub Actions workflow for instant Docker deploys. When an app repo pushes a tag, this workflow updates the image tag in your home-ops repo, triggering [docker-cd](https://github.com/wajeht/docker-cd) to deploy.",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "description": "Reusable GitHub Actions workflow for instant Docker deploys. When an app repo pushes a tag, this workflow updates the image tag in your home-ops repo, triggering docker-cd to deploy.",
+  "type": "module",
+  "scripts": {},
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wajeht/docker-cd-deploy-workflow.git"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
+  "author": "wajeht",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/wajeht/docker-cd-deploy-workflow/issues"
   },
