@@ -1,69 +1,65 @@
 # docker-cd-deploy-workflow
 
-Reusable GitHub Actions workflow for instant Docker deploys. When an app repo pushes a tag, this workflow updates the image tag in your home-ops repo, triggering [docker-cd](https://github.com/wajeht/docker-cd) to deploy.
+Reusable GitHub Actions workflows for [docker-cd](https://github.com/wajeht/docker-cd) deployments.
 
 ```
-App repo pushes tag v1.0.0
+App repo pushes to main
     → GitHub Actions builds image to ghcr.io
-    → This workflow updates home-ops docker-compose.yml
+    → deploy.yaml updates image tag in home-ops
     → docker-cd detects change and deploys
 ```
 
-## Usage
+## Workflows
 
-In your app repo's release workflow:
+| Workflow | Trigger | Description |
+|----------|---------|-------------|
+| `deploy.yaml` | Push to main | Updates image tag in home-ops compose file |
+| `temp-deploy.yaml` | PR labeled `temp-deploy` / new commits | Creates temporary PR environment |
+| `temp-cleanup.yaml` | PR closed / label removed | Removes temporary PR environment |
+
+## Scripts
+
+| Script | Used by | Description |
+|--------|---------|-------------|
+| `src/update-tag.js` | `deploy.yaml` | Updates `ghcr.io` image tag in a compose file |
+| `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites image/labels/volumes for temp env |
+
+## Deploy
+
+Updates the image tag for a single app in home-ops.
 
 ```yaml
 jobs:
-  build-and-push:
-    # ... build and push image to ghcr.io ...
-
   deploy:
-    needs: build-and-push
     uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@main
     with:
-      app-path: apps/your-app-name
-      tag: ${{ needs.build-and-push.outputs.version }}
+      app-path: apps/your-app
+      tag: ${{ needs.build.outputs.tag }}
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
 ```
 
-## Inputs
+### Deploy Inputs
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `home-ops-repo` | No | `wajeht/home-ops` | Target repo to update |
-| `app-path` | Yes | - | Path to app dir (e.g., `apps/ufc`) |
-| `tag` | Yes | - | Image tag (e.g., `v1.0.0`) |
-
-## Secrets
-
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `GH_TOKEN` | Yes | GitHub PAT with `repo` and `packages` scope |
-
-## How It Works
-
-1. Checks out the target home-ops repo
-2. Updates the `image:` tag in `<app-path>/docker-compose.yml` using sed
-3. Commits and pushes if there are changes
-4. docker-cd polls for changes and deploys automatically
-
-Concurrent deploys from different app repos are serialized to prevent push races.
+| `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
+| `app-path` | Yes | - | Path to app dir (e.g., `apps/bang`) |
+| `tag` | Yes | - | Image tag |
 
 ## Temp Deploys
 
-Temporary PR-based deployments. Gives each PR its own live environment.
+Temporary PR-based environments. Each PR gets its own live instance.
 
 ```
 Add `temp-deploy` label to PR
     → Builds image from PR branch
     → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
-    → Rewrites image tag, traefik labels, volume paths
+    → Rewrites image tag, traefik labels, converts bind mounts to named volumes
     → docker-cd deploys to pr-<N>-<app>.jaw.dev
     → Posts deploy URL as PR comment
 
-Push new commits to PR (with label)
+Push new commits (with label present)
     → Rebuilds image with new SHA
     → Updates temp stack with new image
     → docker-cd redeploys
@@ -73,18 +69,27 @@ Close PR or remove label
     → docker-cd garbage collects the stack
 ```
 
-The temp stack is a full copy of the prod stack — databases, env_files, healthchecks, sidecars all included. Volume paths are rewritten (e.g., `~/data/bang` → `~/data/bang-pr-174`) so temp data is isolated from prod.
+### What gets rewritten
+
+The `src/rewrite-compose.js` script copies the full prod stack and modifies:
+
+- **Image tag** — only `ghcr.io/<owner>/*` images, third-party images (postgres, redis) stay untouched
+- **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
+- **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
+- **docker-cd.yml** — forces `rolling_update: false`
+
+Everything else is preserved: env_files, healthchecks, sidecars, networks, resource limits.
 
 ### Prerequisites
 
 1. Wildcard DNS for `*.jaw.dev` (Cloudflare)
 2. Wildcard TLS cert in Traefik (`*.jaw.dev`)
 3. `GH_TOKEN` secret with `repo` and `packages` scope
-4. Create `temp-deploy` label in your repo: `gh label create temp-deploy`
+4. Create `temp-deploy` label: `gh label create temp-deploy`
 
 ### Setup
 
-Add `pull_request` types to your existing CI workflow and append the temp jobs. Full example:
+Add `pull_request` types to your existing CI and append temp jobs:
 
 ```yaml
 name: CI
@@ -166,7 +171,7 @@ jobs:
 | `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
 | `tag` | Yes | - | Image tag |
 | `domain` | No | `jaw.dev` | Base domain |
-| `data-dir` | No | `/home/jaw/data` | Base data directory on server |
+| `data-dir` | No | `/home/jaw/data` | Base data dir (for bind mount → named volume conversion) |
 
 ### Temp Cleanup Inputs
 
@@ -174,6 +179,14 @@ jobs:
 |-------|----------|---------|-------------|
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
+
+## Secrets
+
+All workflows require:
+
+| Secret | Description |
+|--------|-------------|
+| `GH_TOKEN` | GitHub PAT with `repo` and `packages` scope |
 
 ## License
 
