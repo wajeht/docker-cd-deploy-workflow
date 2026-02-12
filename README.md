@@ -19,10 +19,13 @@ App repo pushes to main
 
 ## Scripts
 
+Node.js (ESM), uses `js-yaml` for YAML parsing.
+
 | Script | Used by | Description |
 |--------|---------|-------------|
 | `src/update-tag.js` | `deploy.yaml` | Updates `ghcr.io` image tag in a compose file |
 | `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites image/labels/volumes for temp env |
+| `src/utils.js` | both | Shared helpers (`parseArgs`) |
 
 ## Deploy
 
@@ -79,6 +82,24 @@ The `src/rewrite-compose.js` script copies the full prod stack and modifies:
 - **docker-cd.yml** — forces `rolling_update: false`
 
 Everything else is preserved: env_files, healthchecks, sidecars, networks, resource limits.
+
+### Custom env overrides
+
+To override specific env values for temp deploys without changing prod, add `.enc-temp.env` to the app directory:
+
+```bash
+# Create overrides (only the values you want to change)
+cat > apps/bang/.env-temp << 'EOF'
+APP_ENV=staging
+APP_URL=pr-174-bang.jaw.dev
+EOF
+
+# Encrypt and commit
+sops -e apps/bang/.env-temp > apps/bang/.enc-temp.env
+rm apps/bang/.env-temp
+```
+
+If `.enc-temp.env` exists, the temp compose gets `env_file: [.enc.env, .enc-temp.env]` — Docker Compose uses the last value, so overrides win. Prod is never touched.
 
 ### Prerequisites
 
