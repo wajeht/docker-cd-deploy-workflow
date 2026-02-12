@@ -48,21 +48,11 @@ jobs:
             --tag "${{ inputs.tag }}" \
             --repo "${{ github.repository }}"
 
-      - name: Cleanup workflow scripts
-        run: rm -rf .deploy-workflow
-
       - name: Commit and push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${{ inputs.app-path }}/docker-compose.yml"
-          if git diff --staged --quiet; then
-            echo "No changes - already at ${{ inputs.tag }}"
-          else
-            git commit -m "chore(${{ github.event.repository.name }}): update to ${{ inputs.tag }}"
-            for i in 1 2 3; do
-              git push && break
-              echo "Push failed (attempt $i), rebasing..."
-              git pull --rebase origin main
-            done
-          fi
+          node .deploy-workflow/src/git-push.js \
+            --paths "${{ inputs.app-path }}/docker-compose.yml" \
+            --message "chore(${{ github.event.repository.name }}): update to ${{ inputs.tag }}"
+
+      - name: Cleanup workflow scripts
+        run: rm -rf .deploy-workflow
