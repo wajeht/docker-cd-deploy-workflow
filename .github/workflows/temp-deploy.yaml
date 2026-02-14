@@ -85,6 +85,22 @@ jobs:
             --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
             --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
 
+      - name: Wait for deployment to be healthy
+        run: |
+          URL="${{ steps.rewrite.outputs.url }}"
+          echo "Waiting for $URL to respond with 200..."
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$URL" 2>/dev/null || echo "000")
+            echo "Attempt $i/30: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Deployment is healthy!"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for $URL to become healthy"
+          exit 1
+
       - name: Mark deployment success
         run: |
           node .deploy-workflow/src/deployment.js \
