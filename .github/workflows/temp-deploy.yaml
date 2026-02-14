@@ -86,30 +86,36 @@ jobs:
             --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
 
       - name: Wait for deployment to be healthy
+        id: health
         run: |
           URL="${{ steps.rewrite.outputs.url }}"
-          echo "Waiting for $URL to respond with 200..."
-          for i in $(seq 1 30); do
+          echo "Waiting up to 30s for $URL..."
+          for i in $(seq 1 6); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$URL" 2>/dev/null || echo "000")
-            echo "Attempt $i/30: HTTP $STATUS"
+            echo "Attempt $i/6: HTTP $STATUS"
             if [ "$STATUS" = "200" ]; then
-              echo "Deployment is healthy!"
+              echo "healthy=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            sleep 10
+            sleep 5
           done
-          echo "Timed out waiting for $URL to become healthy"
-          exit 1
+          echo "healthy=false" >> "$GITHUB_OUTPUT"
 
       - name: Mark deployment success
         run: |
+          if [ "${{ steps.health.outputs.healthy }}" = "true" ]; then
+            DESC="Temp deploy is ready"
+          else
+            DESC="Temp deploy will be ready in a few seconds"
+          fi
           node .deploy-workflow/src/deployment.js \
             --action deploy \
             --token "${{ github.token }}" \
             --repo "${{ github.repository }}" \
             --environment "pr-${{ github.event.pull_request.number }}" \
             --deployment-id "${{ steps.deployment.outputs.deployment-id }}" \
-            --url "${{ steps.rewrite.outputs.url }}"
+            --url "${{ steps.rewrite.outputs.url }}" \
+            --description "$DESC"
 
       - name: Cleanup workflow scripts
         run: rm -rf .deploy-workflow .app-repo

@@ -51,7 +51,7 @@ try {
 			body: JSON.stringify({
 				state: 'success',
 				environment_url: url,
-				description: 'Temp deploy is ready',
+				description: args['description'] || 'Temp deploy is ready',
 			}),
 		});
 
