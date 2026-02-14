@@ -46,6 +46,16 @@ jobs:
           token: ${{ secrets.GH_TOKEN }}
           path: .deploy-workflow
 
+      - name: Checkout app repo for env overrides
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GH_TOKEN }}
+          path: .app-repo
+          sparse-checkout: .env.sops
+          sparse-checkout-cone-mode: false
+
       - name: Install dependencies
         run: cd .deploy-workflow && npm ci
 
@@ -56,7 +66,8 @@ jobs:
             --app-path "${{ inputs.app-path }}" \
             --tag "${{ inputs.tag }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
-            --repo-owner "${{ github.repository_owner }}"
+            --repo-owner "${{ github.repository_owner }}" \
+            --app-repo-path .app-repo
 
       - name: Commit and push
         run: |
@@ -75,4 +86,4 @@ jobs:
             --url "${{ steps.rewrite.outputs.url }}"
 
       - name: Cleanup workflow scripts
-        run: rm -rf .deploy-workflow
+        run: rm -rf .deploy-workflow .app-repo

@@ -83,27 +83,29 @@ The `src/rewrite-compose.js` script copies the full prod stack and modifies:
 - **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
 - **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
 - **docker-cd.yml** — forces `rolling_update: false`
-- **env_file** — if `.enc-temp.env` exists, appends it to `env_file` list (overrides prod values)
+- **env overrides** — if `.env.sops` exists in the app repo's PR branch, overwrites the home-ops `.env.sops` (per-PR secrets)
 
 Everything else is preserved: healthchecks, sidecars, networks, resource limits.
 
 ### Custom env overrides
 
-To override specific env values for temp deploys without changing prod, add `.enc-temp.env` to the app directory:
+To override env values for temp deploys, add `.env.sops` to the app repo's PR branch:
 
 ```bash
-# Create overrides (only the values you want to change)
-cat > apps/bang/.env-temp << 'EOF'
+# Create your overrides
+cat > .env.sops.yaml << 'EOF'
 APP_ENV=staging
 APP_URL=pr-174-bang.jaw.dev
+STRIPE_KEY=sk_test_xxx
 EOF
 
-# Encrypt and commit
-sops -e apps/bang/.env-temp > apps/bang/.enc-temp.env
-rm apps/bang/.env-temp
+# Encrypt and commit to your PR branch
+sops -e .env.sops.yaml > .env.sops
+rm .env.sops.yaml
+git add .env.sops && git commit -m "add temp deploy env overrides"
 ```
 
-If `.enc-temp.env` exists, the temp compose gets `env_file: [.enc.env, .enc-temp.env]` — Docker Compose uses the last value, so overrides win. Prod is never touched.
+The temp deploy workflow checks out `.env.sops` from the PR branch and copies it into the temp stack, overwriting the home-ops version. docker-cd decrypts it as usual. Each PR can have different secrets.
 
 ### Prerequisites
 
