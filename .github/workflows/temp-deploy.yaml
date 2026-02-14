@@ -89,10 +89,10 @@ jobs:
         id: health
         run: |
           URL="${{ steps.rewrite.outputs.url }}"
-          echo "Waiting up to 30s for $URL..."
-          for i in $(seq 1 6); do
+          echo "Waiting up to 60s for $URL..."
+          for i in $(seq 1 12); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$URL" 2>/dev/null || echo "000")
-            echo "Attempt $i/6: HTTP $STATUS"
+            echo "Attempt $i/12: HTTP $STATUS"
             if [ "$STATUS" = "200" ]; then
               echo "healthy=true" >> "$GITHUB_OUTPUT"
               exit 0
