@@ -46,12 +46,32 @@ try {
 			process.exit(1);
 		}
 
+		// Poll URL for up to 60s before marking success
+		let healthy = false;
+		console.log(`Waiting up to 60s for ${url}...`);
+		for (let i = 1; i <= 12; i++) {
+			try {
+				const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+				console.log(`Attempt ${i}/12: HTTP ${res.status}`);
+				if (res.ok) {
+					healthy = true;
+					break;
+				}
+			} catch {
+				console.log(`Attempt ${i}/12: not reachable`);
+			}
+			if (i < 12) await new Promise((r) => setTimeout(r, 5000));
+		}
+
+		const description = healthy ? 'Temp deploy is ready' : 'Temp deploy will be ready in a few seconds';
+		console.log(description);
+
 		await githubApi(`/deployments/${deploymentId}/statuses`, {
 			method: 'POST',
 			body: JSON.stringify({
 				state: 'success',
 				environment_url: url,
-				description: args['description'] || 'Temp deploy is ready',
+				description,
 			}),
 		});
 
