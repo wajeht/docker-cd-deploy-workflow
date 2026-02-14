@@ -23,8 +23,8 @@ fs.cpSync(appPath, tempPath, { recursive: true });
 if (appRepoPath) {
 	const appRepoSops = path.join(appRepoPath, '.env.sops');
 	if (fs.existsSync(appRepoSops)) {
-		fs.cpSync(appRepoSops, path.join(tempPath, '.env.sops'));
-		console.log('Copied .env.sops from app repo');
+		fs.cpSync(appRepoSops, path.join(tempPath, '.env.sops.override'));
+		console.log('Copied .env.sops from app repo as .env.sops.override');
 	}
 }
 
