@@ -59,6 +59,16 @@ jobs:
       - name: Install dependencies
         run: cd .deploy-workflow && npm ci
 
+      - name: Request deployment
+        id: deployment
+        run: |
+          node .deploy-workflow/src/deployment.js \
+            --action request \
+            --token "${{ secrets.GH_TOKEN }}" \
+            --repo "${{ github.repository }}" \
+            --environment "pr-${{ github.event.pull_request.number }}" \
+            --ref "${{ github.event.pull_request.head.sha }}"
+
       - name: Rewrite compose for temp deploy
         id: rewrite
         run: |
@@ -75,14 +85,14 @@ jobs:
             --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
             --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
 
-      - name: Create GitHub deployment
+      - name: Mark deployment success
         run: |
           node .deploy-workflow/src/deployment.js \
             --action deploy \
             --token "${{ secrets.GH_TOKEN }}" \
             --repo "${{ github.repository }}" \
             --environment "pr-${{ github.event.pull_request.number }}" \
-            --ref "${{ github.event.pull_request.head.sha }}" \
+            --deployment-id "${{ steps.deployment.outputs.deployment-id }}" \
             --url "${{ steps.rewrite.outputs.url }}"
 
       - name: Cleanup workflow scripts
