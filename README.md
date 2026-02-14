@@ -211,7 +211,7 @@ jobs:
 |--------|-------------|-------------|
 | `GH_TOKEN` | All workflows | GitHub PAT with `repo` and `packages` scope |
 
-GitHub Deployments use the automatic `github.token` — no extra secrets needed.
+GitHub Deployments use `GH_TOKEN` so they show as your user instead of github-actions bot.
 
 ## License
 

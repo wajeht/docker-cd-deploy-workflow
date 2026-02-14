@@ -79,7 +79,7 @@ jobs:
         run: |
           node .deploy-workflow/src/deployment.js \
             --action deploy \
-            --token "${{ github.token }}" \
+            --token "${{ secrets.GH_TOKEN }}" \
             --repo "${{ github.repository }}" \
             --environment "pr-${{ github.event.pull_request.number }}" \
             --ref "${{ github.event.pull_request.head.sha }}" \
