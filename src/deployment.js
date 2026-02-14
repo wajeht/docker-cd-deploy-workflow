@@ -48,11 +48,11 @@ try {
 
 		// Poll URL for up to 60s before marking success
 		let healthy = false;
-		console.log(`Waiting up to 60s for ${url}...`);
-		for (let i = 1; i <= 12; i++) {
+		console.log(`Waiting up to 120s for ${url}...`);
+		for (let i = 1; i <= 24; i++) {
 			try {
 				const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-				console.log(`Attempt ${i}/12: HTTP ${res.status}`);
+				console.log(`Attempt ${i}/24: HTTP ${res.status}`);
 				if (res.ok) {
 					healthy = true;
 					break;
@@ -60,7 +60,7 @@ try {
 			} catch {
 				console.log(`Attempt ${i}/12: not reachable`);
 			}
-			if (i < 12) await new Promise((r) => setTimeout(r, 5000));
+			if (i < 24) await new Promise((r) => setTimeout(r, 5000));
 		}
 
 		const description = healthy ? 'Temp deploy is ready' : 'Temp deploy will be ready in a few seconds';
