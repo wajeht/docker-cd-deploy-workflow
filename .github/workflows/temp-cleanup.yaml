@@ -55,7 +55,7 @@ jobs:
         run: |
           node .deploy-workflow/src/deployment.js \
             --action cleanup \
-            --token "${{ secrets.GH_TOKEN }}" \
+            --token "${{ github.token }}" \
             --repo "${{ github.repository }}" \
             --environment "pr-${{ github.event.pull_request.number }}"
 
