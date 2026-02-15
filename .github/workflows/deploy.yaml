@@ -29,13 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout home-ops
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.home-ops-repo }}
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Checkout deploy workflow scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: wajeht/docker-cd-deploy-workflow
           token: ${{ secrets.GH_TOKEN }}
