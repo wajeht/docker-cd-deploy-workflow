@@ -13,7 +13,7 @@ App repo pushes to main
 
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
-| `deploy.yaml` | Push to main | Updates image tag in home-ops compose file |
+| `deploy.yaml` | Push to main | Updates image tag in home-ops, creates GitHub Deployment |
 | `temp-deploy.yaml` | PR labeled `temp-deploy` / new commits | Creates temporary PR environment |
 | `temp-cleanup.yaml` | PR closed / label removed | Removes temporary PR environment |
 
@@ -24,22 +24,35 @@ Node.js (ESM), uses `js-yaml` for YAML parsing.
 | Script | Used by | Description |
 |--------|---------|-------------|
 | `src/update-tag.js` | `deploy.yaml` | Updates `ghcr.io` image tag in a compose file |
-| `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites image/labels/volumes for temp env |
-| `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates/cleans up GitHub Deployments for "View deployment" button on PRs |
-| `src/comment.js` | - | Posts/updates PR comments (legacy, replaced by `deployment.js`) |
+| `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites for temp env, strips borgmatic |
+| `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates/cleans up GitHub Deployments for PR environments |
+| `src/git-push.js` | all deploy workflows | Commits and pushes with retry on conflict |
 | `src/utils.js` | all | Shared helpers (`parseArgs`, `createGitHubApi`) |
 
 ## Deploy
 
-Updates the image tag for a single app in home-ops.
+Updates the image tag for a single app in home-ops and tracks it as a GitHub Deployment.
 
 ```yaml
 jobs:
   deploy:
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@main
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.18
     with:
       app-path: apps/your-app
       tag: ${{ needs.build.outputs.tag }}
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+```
+
+With custom URL (for apps not on `*.jaw.dev`):
+
+```yaml
+  deploy:
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.18
+    with:
+      app-path: apps/close-powerlifting
+      tag: ${{ needs.build.outputs.tag }}
+      url: https://closepowerlifting.com
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
 ```
@@ -51,6 +64,14 @@ jobs:
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Path to app dir (e.g., `apps/bang`) |
 | `tag` | Yes | - | Image tag |
+| `url` | No | `https://<repo-name>.jaw.dev` | Production URL shown in GitHub Deployments |
+
+### Deploy Tracking
+
+Uses native GitHub Actions `environment:` which gives you:
+- "production" entry in the repo's Deployments sidebar
+- Clickable URL link to the deployed app
+- Deploy queue (serialized via `concurrency: deploy-home-ops`)
 
 ## Temp Deploys
 
@@ -61,8 +82,9 @@ Add `temp-deploy` label to PR
     → Builds image from PR branch
     → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
     → Rewrites image tag, traefik labels, converts bind mounts to named volumes
+    → Strips borgmatic services and container_name
     → docker-cd deploys to pr-<N>-<app>.jaw.dev
-    → Creates a GitHub Deployment with "View deployment" button linking to the URL
+    → Creates GitHub Deployment with "View deployment" link
 
 Push new commits (with label present)
     → Rebuilds image with new SHA
@@ -82,10 +104,12 @@ The `src/rewrite-compose.js` script copies the full prod stack and modifies:
 - **Image tag** — only `ghcr.io/<owner>/*` images, third-party images (postgres, redis) stay untouched
 - **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
 - **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
+- **Borgmatic services** — stripped (backup not needed in temp envs)
+- **container_name** — stripped (avoids naming conflicts with prod containers)
 - **docker-cd.yml** — forces `rolling_update: false`
 - **env overrides** — if `.env.sops` exists in the app repo's PR branch, overwrites the home-ops `.env.sops` (per-PR secrets)
 
-Everything else is preserved: healthchecks, sidecars, networks, resource limits.
+Everything else is preserved: healthchecks, networks, resource limits, security settings.
 
 ### Custom env overrides
 
@@ -171,7 +195,9 @@ jobs:
       (github.event.action == 'labeled' && github.event.label.name == 'temp-deploy') ||
       (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'temp-deploy'))
     needs: temp-build
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@main
+    permissions:
+      deployments: write
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.18
     with:
       app-path: apps/your-app    # change this
       tag: ${{ needs.temp-build.outputs.tag }}
@@ -183,7 +209,9 @@ jobs:
     if: >
       github.event.action == 'closed' ||
       (github.event.action == 'unlabeled' && github.event.label.name == 'temp-deploy')
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@main
+    permissions:
+      deployments: write
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@v0.0.18
     with:
       app-path: apps/your-app    # change this
     secrets:
@@ -210,8 +238,6 @@ jobs:
 | Secret | Required by | Description |
 |--------|-------------|-------------|
 | `GH_TOKEN` | All workflows | GitHub PAT with `repo` and `packages` scope |
-
-GitHub Deployments use `GH_TOKEN` so they show as your user instead of github-actions bot.
 
 ## License
 
