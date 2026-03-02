@@ -6,6 +6,7 @@ const action = args['action'];
 const environment = args['environment'];
 const url = args['url'];
 const ref = args['ref'] || 'main';
+const production = args['production'] === 'true';
 
 const githubApi = createGitHubApi(args['token'], args['repo']);
 
@@ -18,8 +19,8 @@ try {
 				environment,
 				auto_merge: false,
 				required_contexts: [],
-				transient_environment: true,
-				production_environment: false,
+				transient_environment: !production,
+				production_environment: production,
 			}),
 		});
 		const deployment = await res.json();
@@ -41,30 +42,36 @@ try {
 		}
 	} else if (action === 'deploy') {
 		const deploymentId = args['deployment-id'];
+		const skipHealthCheck = args['skip-health-check'] === 'true';
 		if (!url || !deploymentId) {
 			console.error('--url and --deployment-id are required for deploy action');
 			process.exit(1);
 		}
 
-		// Poll URL for up to 60s before marking success
-		let healthy = false;
-		console.log(`Waiting up to 120s for ${url}...`);
-		for (let i = 1; i <= 24; i++) {
-			try {
-				const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-				console.log(`Attempt ${i}/24: HTTP ${res.status}`);
-				if (res.ok) {
-					healthy = true;
-					break;
+		let description;
+		if (skipHealthCheck) {
+			description = 'Deploy committed, docker-cd will pick it up';
+			console.log(description);
+		} else {
+			// Poll URL for up to 120s before marking success
+			let healthy = false;
+			console.log(`Waiting up to 120s for ${url}...`);
+			for (let i = 1; i <= 24; i++) {
+				try {
+					const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+					console.log(`Attempt ${i}/24: HTTP ${res.status}`);
+					if (res.ok) {
+						healthy = true;
+						break;
+					}
+				} catch {
+					console.log(`Attempt ${i}/24: not reachable`);
 				}
-			} catch {
-				console.log(`Attempt ${i}/12: not reachable`);
+				if (i < 24) await new Promise((r) => setTimeout(r, 5000));
 			}
-			if (i < 24) await new Promise((r) => setTimeout(r, 5000));
+			description = healthy ? 'Temp deploy is ready' : 'Temp deploy will be ready in a few seconds';
+			console.log(description);
 		}
-
-		const description = healthy ? 'Temp deploy is ready' : 'Temp deploy will be ready in a few seconds';
-		console.log(description);
 
 		await githubApi(`/deployments/${deploymentId}/statuses`, {
 			method: 'POST',
