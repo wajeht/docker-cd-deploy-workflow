@@ -55,11 +55,13 @@ if (!originalHost) {
 const domain = originalHost.split('.').slice(1).join('.');
 const hostname = `pr-${prNumber}-${appName}.${domain}`;
 
-// Remove borgmatic services (not needed in temp deploys)
-for (const name of Object.keys(doc.services)) {
+// Remove borgmatic services and container_name (not needed in temp deploys)
+for (const [name, service] of Object.entries(doc.services)) {
 	if (name.endsWith('-borgmatic')) {
 		delete doc.services[name];
 		console.log(`Removed borgmatic service: ${name}`);
+	} else if (service.container_name) {
+		delete service.container_name;
 	}
 }
 
