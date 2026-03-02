@@ -15,6 +15,9 @@ on:
         type: string
         required: true
         description: "Image tag (e.g., v0.1.2)"
+      url:
+        type: string
+        description: "Production URL (defaults to <repo-name>.jaw.dev)"
     secrets:
       GH_TOKEN:
         required: true
@@ -27,8 +30,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      deployments: write
+    environment:
+      name: production
+      url: ${{ inputs.url || format('https://{0}.jaw.dev', github.event.repository.name) }}
     steps:
       - name: Checkout home-ops
         uses: actions/checkout@v6
@@ -43,20 +47,6 @@ jobs:
           token: ${{ secrets.GH_TOKEN }}
           path: .deploy-workflow
 
-      - name: Install dependencies
-        run: cd .deploy-workflow && npm ci
-
-      - name: Request deployment
-        id: deployment
-        run: |
-          node .deploy-workflow/src/deployment.js \
-            --action request \
-            --token "${{ github.token }}" \
-            --repo "${{ github.repository }}" \
-            --environment "production" \
-            --ref "${{ github.sha }}" \
-            --production true
-
       - name: Update image tag
         run: |
           node .deploy-workflow/src/update-tag.js \
@@ -69,17 +59,6 @@ jobs:
           node .deploy-workflow/src/git-push.js \
             --paths "${{ inputs.app-path }}/docker-compose.yml" \
             --message "chore(${{ github.event.repository.name }}): update to ${{ inputs.tag }}"
-
-      - name: Mark deployment success
-        run: |
-          node .deploy-workflow/src/deployment.js \
-            --action deploy \
-            --token "${{ github.token }}" \
-            --repo "${{ github.repository }}" \
-            --environment "production" \
-            --deployment-id "${{ steps.deployment.outputs.deployment-id }}" \
-            --url "https://${{ github.event.repository.name }}.jaw.dev" \
-            --skip-health-check true
 
       - name: Cleanup workflow scripts
         run: rm -rf .deploy-workflow
