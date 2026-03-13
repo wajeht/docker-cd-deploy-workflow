@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { parseArgs, detectHost } from './utils.js';
+import { parseArgs, detectHost, collectHosts } from './utils.js';
 
 const args = parseArgs(process.argv.slice(2), { required: ['app-path', 'tag', 'pr-number', 'repo-owner'] });
 const appRepoPath = args['app-repo-path'];
@@ -33,6 +33,7 @@ const composePath = path.join(tempPath, 'docker-compose.yml');
 const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
 
 // Auto-detect domain from traefik Host() labels
+const allHosts = collectHosts(doc.services);
 const originalHost = detectHost(doc.services);
 
 if (!originalHost) {
@@ -65,12 +66,15 @@ for (const [, service] of Object.entries(doc.services)) {
 
 	// Rewrite traefik labels
 	if (service.labels) {
-		service.labels = service.labels.map((label) =>
-			label
-				.replaceAll(`traefik.http.routers.${appName}`, `traefik.http.routers.${tempName}`)
-				.replaceAll(`traefik.http.services.${appName}`, `traefik.http.services.${tempName}`)
-				.replaceAll(originalHost, hostname),
-		);
+		service.labels = service.labels
+			// Remove redirect routers/middlewares (not needed in temp deploys)
+			.filter((label) => !label.includes('redirect'))
+			.map((label) =>
+				label
+					.replaceAll(`traefik.http.routers.${appName}`, `traefik.http.routers.${tempName}`)
+					.replaceAll(`traefik.http.services.${appName}`, `traefik.http.services.${tempName}`)
+					.replace(/Host\(`[^`]+`\)/g, `Host(\`${hostname}\`)`),
+			);
 	}
 
 	// Convert all bind mounts to named volumes

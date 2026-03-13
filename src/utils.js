@@ -16,18 +16,24 @@ export function parseArgs(argv, { required = [] } = {}) {
 	return result;
 }
 
-// Pick best host from compose services' traefik Host() labels
-// Prefers subdomain hosts (3+ parts like x.jaw.dev) over bare domains (closepowerlifting.com)
-export function detectHost(services) {
+// Collect all Host() values from traefik labels
+export function collectHosts(services) {
 	const allHosts = [];
 	for (const [, service] of Object.entries(services)) {
 		if (!service.labels) continue;
 		for (const label of service.labels) {
 			for (const match of label.matchAll(/Host\(`([^`]+)`\)/g)) {
-				allHosts.push(match[1]);
+				if (!allHosts.includes(match[1])) allHosts.push(match[1]);
 			}
 		}
 	}
+	return allHosts;
+}
+
+// Pick best host for domain extraction
+// Prefers non-www subdomain hosts (3+ parts like x.jaw.dev) over bare domains (closepowerlifting.com)
+export function detectHost(services) {
+	const allHosts = collectHosts(services);
 	return allHosts.find((h) => h.split('.').length >= 3 && !h.startsWith('www.')) || allHosts.find((h) => h.split('.').length >= 3) || allHosts[0] || null;
 }
 
