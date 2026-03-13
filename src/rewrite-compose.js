@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { parseArgs } from './utils.js';
+import { parseArgs, detectHost } from './utils.js';
 
 const args = parseArgs(process.argv.slice(2), { required: ['app-path', 'tag', 'pr-number', 'repo-owner'] });
 const appRepoPath = args['app-repo-path'];
@@ -33,18 +33,7 @@ const composePath = path.join(tempPath, 'docker-compose.yml');
 const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
 
 // Auto-detect domain from traefik Host() labels
-let originalHost = null;
-for (const [, service] of Object.entries(doc.services)) {
-	if (!service.labels) continue;
-	for (const label of service.labels) {
-		const match = label.match(/Host\(`([^`]+)`\)/);
-		if (match) {
-			originalHost = match[1];
-			break;
-		}
-	}
-	if (originalHost) break;
-}
+const originalHost = detectHost(doc.services);
 
 if (!originalHost) {
 	console.error('Could not detect domain from traefik Host() labels');
