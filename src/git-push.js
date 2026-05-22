@@ -3,11 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from './utils.js';
 
-export async function main(argv = process.argv.slice(2), exec = execFileSync) {
+export async function main(argv = process.argv.slice(2)) {
 	const args = parseArgs(argv, { required: ['message'] });
 	function run(cmd, cmdArgs) {
 		console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
-		return exec(cmd, cmdArgs, { stdio: 'inherit' });
+		return execFileSync(cmd, cmdArgs, { stdio: 'inherit' });
 	}
 
 	if (!args['paths'] && !args['all']) {
@@ -32,7 +32,7 @@ export async function main(argv = process.argv.slice(2), exec = execFileSync) {
 	}
 
 	try {
-		exec('git', ['diff', '--staged', '--quiet']);
+		execFileSync('git', ['diff', '--staged', '--quiet']);
 		console.log('No changes to commit');
 		return;
 	} catch {
