@@ -12,6 +12,10 @@ on:
         type: string
         required: true
         description: "Base app path (e.g., apps/bang)"
+      service-name:
+        type: string
+        required: true
+        description: "Compose service to deploy (e.g., bang)"
       tag:
         type: string
         required: true
@@ -74,6 +78,7 @@ jobs:
         run: |
           node .deploy-workflow/src/rewrite-compose.js \
             --app-path "${{ inputs.app-path }}" \
+            --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
             --repo-owner "${{ github.repository_owner }}" \

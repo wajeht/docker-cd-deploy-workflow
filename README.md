@@ -39,6 +39,7 @@ jobs:
     uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.18
     with:
       app-path: apps/your-app
+      service-name: your-app
       tag: ${{ needs.build.outputs.tag }}
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -51,6 +52,7 @@ With custom URL (for apps not on `*.jaw.dev`):
     uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.18
     with:
       app-path: apps/close-powerlifting
+      service-name: close-powerlifting
       tag: ${{ needs.build.outputs.tag }}
       url: https://closepowerlifting.com
     secrets:
@@ -63,6 +65,7 @@ With custom URL (for apps not on `*.jaw.dev`):
 |-------|----------|---------|-------------|
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Path to app dir (e.g., `apps/bang`) |
+| `service-name` | Yes | - | Compose service to update (e.g., `bang`) |
 | `tag` | Yes | - | Image tag |
 | `url` | No | `https://<repo-name>.jaw.dev` | Production URL shown in GitHub Deployments |
 
@@ -102,7 +105,7 @@ Close PR or remove label
 
 The `src/rewrite-compose.js` script copies the prod app directory and modifies:
 
-- **Service set** — keeps the main service named after `app-path` plus its recursive `depends_on` services, and removes sibling services that the app does not need
+- **Service set** — keeps `service-name` plus its recursive `depends_on` services, and removes sibling services that the app does not need
 - **Image tag** — only `ghcr.io/<owner>/*` images, third-party images (postgres, redis) stay untouched
 - **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
 - **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
@@ -207,6 +210,7 @@ jobs:
     uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.18
     with:
       app-path: apps/your-app    # change this
+      service-name: your-app     # change this
       tag: ${{ needs.temp-build.outputs.tag }}
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -231,6 +235,7 @@ jobs:
 |-------|----------|---------|-------------|
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
+| `service-name` | Yes | - | Compose service to deploy (e.g., `bang`) |
 | `tag` | Yes | - | Image tag |
 
 ### Temp Cleanup Inputs

@@ -11,6 +11,10 @@ on:
         type: string
         required: true
         description: "Path to docker-compose.yml (e.g., apps/ufc)"
+      service-name:
+        type: string
+        required: true
+        description: "Compose service to update (e.g., ufc)"
       tag:
         type: string
         required: true
@@ -51,6 +55,7 @@ jobs:
         run: |
           node .deploy-workflow/src/update-tag.js \
             --app-path "${{ inputs.app-path }}" \
+            --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \
             --repo "${{ github.repository }}"
 
