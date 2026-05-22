@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { parseArgs, runMain } from './utils.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from './utils.js';
 
 const run = (cmd, cmdArgs) => {
 	console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
@@ -54,4 +56,9 @@ export async function main(argv = process.argv.slice(2)) {
 	}
 }
 
-runMain(import.meta.url, main);
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+	main().catch((err) => {
+		console.error(err.message);
+		process.exit(1);
+	});
+}

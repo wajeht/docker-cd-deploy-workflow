@@ -1,4 +1,6 @@
-import { appendGithubOutput, parseArgs, createGitHubApi, runMain } from './utils.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { appendGithubOutput, parseArgs, createGitHubApi } from './utils.js';
 
 async function requestDeployment(githubApi, args) {
 	const environment = args['environment'];
@@ -113,4 +115,9 @@ export async function main(argv = process.argv.slice(2)) {
 	}
 }
 
-runMain(import.meta.url, main);
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+	main().catch((err) => {
+		console.error(err.message);
+		process.exit(1);
+	});
+}

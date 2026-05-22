@@ -1,6 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 export function isObject(value) {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -21,19 +19,6 @@ export function parseArgs(argv, { required = [] } = {}) {
 		}
 	}
 	return result;
-}
-
-export function isMain(importMetaUrl) {
-	return Boolean(process.argv[1]) && fileURLToPath(importMetaUrl) === path.resolve(process.argv[1]);
-}
-
-export function runMain(importMetaUrl, main) {
-	if (!isMain(importMetaUrl)) return;
-
-	main().catch((err) => {
-		console.error(err.message);
-		process.exit(1);
-	});
 }
 
 export function appendGithubOutput(name, value) {

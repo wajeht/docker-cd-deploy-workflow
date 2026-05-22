@@ -1,5 +1,7 @@
 import fs from 'node:fs';
-import { parseArgs, runMain, tempStackPath } from './utils.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseArgs, tempStackPath } from './utils.js';
 
 export async function main(argv = process.argv.slice(2)) {
 	const args = parseArgs(argv, { required: ['app-path', 'pr-number'] });
@@ -16,4 +18,9 @@ export async function main(argv = process.argv.slice(2)) {
 	console.log(`Removed temp stack at ${tempPath}`);
 }
 
-runMain(import.meta.url, main);
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+	main().catch((err) => {
+		console.error(err.message);
+		process.exit(1);
+	});
+}

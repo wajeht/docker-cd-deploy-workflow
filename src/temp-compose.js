@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import {
 	appendGithubOutput,
 	parseArgs,
 	detectHost,
 	dependentServices,
-	runMain,
 	tempStackPath,
 } from './utils.js';
 
@@ -197,4 +197,9 @@ export async function main(argv = process.argv.slice(2)) {
 	appendGithubOutput('temp-path', tempPath);
 }
 
-runMain(import.meta.url, main);
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+	main().catch((err) => {
+		console.error(err.message);
+		process.exit(1);
+	});
+}
