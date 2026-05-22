@@ -4,7 +4,7 @@ import { main } from './git-push.js';
 
 function fakeExec(failures = {}) {
 	const calls = [];
-	const exec = (cmd, args) => {
+	function exec(cmd, args) {
 		const key = [cmd, ...args].join(' ');
 		calls.push([cmd, args]);
 		const failure = failures[key];
@@ -14,7 +14,7 @@ function fakeExec(failures = {}) {
 				throw new Error(key);
 			}
 		}
-	};
+	}
 	exec.calls = calls;
 	return exec;
 }

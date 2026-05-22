@@ -7,7 +7,7 @@ import { main } from './deployment.js';
 
 function fakeFetch(responses) {
 	const calls = [];
-	const fetch = async (url, options = {}) => {
+	async function fetch(url, options = {}) {
 		const response = responses.shift() || {};
 		calls.push({
 			url,
@@ -17,10 +17,14 @@ function fakeFetch(responses) {
 		return {
 			ok: response.ok ?? true,
 			status: response.status ?? 200,
-			json: async () => response.json ?? {},
-			text: async () => response.text ?? '',
+			async json() {
+				return response.json ?? {};
+			},
+			async text() {
+				return response.text ?? '';
+			},
 		};
-	};
+	}
 	fetch.calls = calls;
 	return fetch;
 }

@@ -5,10 +5,10 @@ import { parseArgs } from './utils.js';
 
 export async function main(argv = process.argv.slice(2), exec = execFileSync) {
 	const args = parseArgs(argv, { required: ['message'] });
-	const run = (cmd, cmdArgs) => {
+	function run(cmd, cmdArgs) {
 		console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
 		return exec(cmd, cmdArgs, { stdio: 'inherit' });
-	};
+	}
 
 	if (!args['paths'] && !args['all']) {
 		throw new Error('Missing required arg: --paths or --all');
