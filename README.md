@@ -24,7 +24,7 @@ Node.js (ESM), uses `js-yaml` for YAML parsing.
 | Script | Used by | Description |
 |--------|---------|-------------|
 | `src/update-tag.js` | `deploy.yaml` | Updates `ghcr.io` image tag in a compose file |
-| `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites for temp env, strips borgmatic |
+| `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites for temp env |
 | `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates/cleans up GitHub Deployments for PR environments |
 | `src/git-push.js` | all deploy workflows | Commits and pushes with retry on conflict |
 | `src/utils.js` | all | Shared helpers (`parseArgs`, `createGitHubApi`) |
@@ -83,7 +83,7 @@ Add `temp-deploy` label to PR
     → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
     → Keeps only <app> and its recursive depends_on services
     → Rewrites image tag, traefik labels, converts bind mounts to named volumes
-    → Strips borgmatic services and container_name
+    → Strips container_name
     → docker-cd deploys to pr-<N>-<app>.jaw.dev
     → Creates GitHub Deployment with "View deployment" link
 
@@ -107,7 +107,6 @@ The `src/rewrite-compose.js` script copies the prod app directory and modifies:
 - **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
 - **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
 - **Networks/volumes** — top-level declarations unused by the kept services are removed
-- **Borgmatic services** — stripped (backup not needed in temp envs)
 - **container_name** — stripped (avoids naming conflicts with prod containers)
 - **docker-cd.yml** — forces `rolling_update: false`
 - **env overrides** — if `.env.sops` exists in the app repo's PR branch, copies it into the temp stack as `.env.sops.override` so docker-cd merges it over the home-ops base `.env.sops`

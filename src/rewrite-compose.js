@@ -115,12 +115,9 @@ function pruneVolumes(volumeNames) {
 	}
 }
 
-// Remove borgmatic services and container_name (not needed in temp deploys)
-for (const [name, service] of Object.entries(doc.services)) {
-	if (name.endsWith('-borgmatic')) {
-		delete doc.services[name];
-		console.log(`Removed borgmatic service: ${name}`);
-	} else if (service.container_name) {
+// Remove container_name to avoid conflicts with prod containers
+for (const service of Object.values(doc.services)) {
+	if (service.container_name) {
 		delete service.container_name;
 	}
 }
