@@ -19,7 +19,7 @@ App repo pushes to main
 
 ## Scripts
 
-Node.js (ESM), uses `js-yaml` for YAML parsing.
+Node.js 26 (ESM), uses `js-yaml` for YAML parsing.
 
 | Script | Used by | Description |
 |--------|---------|-------------|
