@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { parseArgs, detectHost, collectHosts } from './utils.js';
+import { parseArgs, detectHost, dependentServices } from './utils.js';
 
 const args = parseArgs(process.argv.slice(2), { required: ['app-path', 'tag', 'pr-number', 'repo-owner'] });
 const appRepoPath = args['app-repo-path'];
@@ -32,8 +32,20 @@ if (appRepoPath) {
 const composePath = path.join(tempPath, 'docker-compose.yml');
 const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
 
+const selectedServices = dependentServices(doc.services, appName);
+if (selectedServices.size === 0) {
+	console.error(`Could not find app service "${appName}" in ${composePath}`);
+	process.exit(1);
+}
+
+for (const serviceName of Object.keys(doc.services)) {
+	if (!selectedServices.has(serviceName)) {
+		delete doc.services[serviceName];
+		console.log(`Removed unrelated service: ${serviceName}`);
+	}
+}
+
 // Auto-detect domain from traefik Host() labels
-const allHosts = collectHosts(doc.services);
 const originalHost = detectHost(doc.services);
 
 if (!originalHost) {
@@ -44,6 +56,64 @@ if (!originalHost) {
 // e.g. "bang.jaw.dev" → domain is "jaw.dev"
 const domain = originalHost.split('.').slice(1).join('.');
 const hostname = `pr-${prNumber}-${appName}.${domain}`;
+
+function serviceNetworkNames(service) {
+	if (Array.isArray(service.networks)) {
+		return service.networks.filter((name) => typeof name === 'string');
+	}
+	if (service.networks && typeof service.networks === 'object') {
+		return Object.keys(service.networks);
+	}
+	return [];
+}
+
+function pruneNetworks() {
+	if (!doc.networks) return;
+
+	const usedNetworks = new Set();
+	for (const service of Object.values(doc.services)) {
+		for (const networkName of serviceNetworkNames(service)) {
+			usedNetworks.add(networkName);
+		}
+	}
+
+	for (const networkName of Object.keys(doc.networks)) {
+		if (!usedNetworks.has(networkName)) {
+			delete doc.networks[networkName];
+			console.log(`Removed unused network: ${networkName}`);
+		}
+	}
+
+	if (Object.keys(doc.networks).length === 0) {
+		delete doc.networks;
+	}
+}
+
+function namedVolumeFromString(volume) {
+	const [source] = volume.split(':');
+	if (!source || path.isAbsolute(source) || source.startsWith('.')) {
+		return null;
+	}
+	if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(source)) {
+		return null;
+	}
+	return source;
+}
+
+function pruneVolumes(volumeNames) {
+	if (!doc.volumes) return;
+
+	for (const volumeName of Object.keys(doc.volumes)) {
+		if (!volumeNames.has(volumeName)) {
+			delete doc.volumes[volumeName];
+			console.log(`Removed unused volume: ${volumeName}`);
+		}
+	}
+
+	if (Object.keys(doc.volumes).length === 0) {
+		delete doc.volumes;
+	}
+}
 
 // Remove borgmatic services and container_name (not needed in temp deploys)
 for (const [name, service] of Object.entries(doc.services)) {
@@ -80,13 +150,22 @@ for (const [, service] of Object.entries(doc.services)) {
 	// Convert all bind mounts to named volumes
 	if (service.volumes) {
 		service.volumes = service.volumes.map((vol) => {
-			if (typeof vol !== 'string') return vol;
+			if (typeof vol !== 'string') {
+				if (vol?.type === 'volume' && typeof vol.source === 'string') {
+					volumeNames.add(vol.source);
+				}
+				return vol;
+			}
 
 			const [hostPath, ...rest] = vol.split(':');
 			const containerPath = rest.join(':');
 
 			// Skip non-absolute paths (already named volumes)
-			if (!path.isAbsolute(hostPath)) return vol;
+			if (!path.isAbsolute(hostPath)) {
+				const volumeName = namedVolumeFromString(vol);
+				if (volumeName) volumeNames.add(volumeName);
+				return vol;
+			}
 
 			const volName = hostPath.split('/').filter(Boolean).pop() || 'data';
 
@@ -95,6 +174,9 @@ for (const [, service] of Object.entries(doc.services)) {
 		});
 	}
 }
+
+pruneNetworks();
+pruneVolumes(volumeNames);
 
 // Add named volume declarations
 if (volumeNames.size > 0) {

@@ -37,6 +37,39 @@ export function detectHost(services) {
 	return allHosts.find((h) => h.split('.').length >= 3 && !h.startsWith('www.')) || allHosts.find((h) => h.split('.').length >= 3) || allHosts[0] || null;
 }
 
+export function dependsOnServices(service) {
+	const dependsOn = service?.depends_on;
+	if (Array.isArray(dependsOn)) {
+		return dependsOn.filter((name) => typeof name === 'string');
+	}
+	if (dependsOn && typeof dependsOn === 'object') {
+		return Object.keys(dependsOn);
+	}
+	return [];
+}
+
+export function dependentServices(services, rootService) {
+	if (!services || !Object.hasOwn(services, rootService)) {
+		return new Set();
+	}
+
+	const selected = new Set([rootService]);
+	const pending = [rootService];
+
+	while (pending.length > 0) {
+		const serviceName = pending.pop();
+		for (const dependency of dependsOnServices(services[serviceName])) {
+			if (!Object.hasOwn(services, dependency) || selected.has(dependency)) {
+				continue;
+			}
+			selected.add(dependency);
+			pending.push(dependency);
+		}
+	}
+
+	return selected;
+}
+
 export function createGitHubApi(token, repo) {
 	const apiBase = `https://api.github.com/repos/${repo}`;
 	const headers = {

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { detectHost, collectHosts } from './utils.js';
+import { detectHost, collectHosts, dependentServices, dependsOnServices } from './utils.js';
 
 describe('collectHosts', () => {
 	it('collects all unique hosts from labels', () => {
@@ -103,6 +103,46 @@ describe('detectHost', () => {
 			},
 		};
 		assert.strictEqual(detectHost(services), 'app.jaw.dev');
+	});
+});
+
+describe('dependsOnServices', () => {
+	it('reads list syntax', () => {
+		assert.deepStrictEqual(dependsOnServices({ depends_on: ['db', 'redis'] }), ['db', 'redis']);
+	});
+
+	it('reads condition map syntax', () => {
+		assert.deepStrictEqual(dependsOnServices({ depends_on: { db: { condition: 'service_healthy' } } }), ['db']);
+	});
+
+	it('ignores missing depends_on', () => {
+		assert.deepStrictEqual(dependsOnServices({ image: 'nginx' }), []);
+	});
+});
+
+describe('dependentServices', () => {
+	it('keeps the app service when there are no dependencies', () => {
+		const selected = dependentServices({ web: { image: 'nginx' }, worker: { image: 'nginx' } }, 'web');
+
+		assert.deepStrictEqual([...selected].sort(), ['web']);
+	});
+
+	it('follows recursive dependencies and skips siblings', () => {
+		const selected = dependentServices(
+			{
+				web: { depends_on: { api: { condition: 'service_started' } } },
+				api: { depends_on: ['db'] },
+				db: { image: 'postgres' },
+				worker: { depends_on: ['db'] },
+			},
+			'web',
+		);
+
+		assert.deepStrictEqual([...selected].sort(), ['api', 'db', 'web']);
+	});
+
+	it('returns an empty set when the app service is missing', () => {
+		assert.deepStrictEqual([...dependentServices({ db: { image: 'postgres' } }, 'web')], []);
 	});
 });
 

@@ -81,6 +81,7 @@ Temporary PR-based environments. Each PR gets its own live instance.
 Add `temp-deploy` label to PR
     → Builds image from PR branch
     → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
+    → Keeps only <app> and its recursive depends_on services
     → Rewrites image tag, traefik labels, converts bind mounts to named volumes
     → Strips borgmatic services and container_name
     → docker-cd deploys to pr-<N>-<app>.jaw.dev
@@ -99,17 +100,20 @@ Close PR or remove label
 
 ### What gets rewritten
 
-The `src/rewrite-compose.js` script copies the full prod stack and modifies:
+The `src/rewrite-compose.js` script copies the prod app directory and modifies:
 
+- **Service set** — keeps the main service named after `app-path` plus its recursive `depends_on` services, and removes sibling services that the app does not need
 - **Image tag** — only `ghcr.io/<owner>/*` images, third-party images (postgres, redis) stay untouched
 - **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
 - **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
+- **Networks/volumes** — top-level declarations unused by the kept services are removed
 - **Borgmatic services** — stripped (backup not needed in temp envs)
 - **container_name** — stripped (avoids naming conflicts with prod containers)
 - **docker-cd.yml** — forces `rolling_update: false`
 - **env overrides** — if `.env.sops` exists in the app repo's PR branch, copies it into the temp stack as `.env.sops.override` so docker-cd merges it over the home-ops base `.env.sops`
 
-Everything else is preserved: healthchecks, networks, resource limits, security settings.
+Everything else on the kept services is preserved: healthchecks, resource limits, security settings.
+If a temp deploy needs a database, redis, or another local service, declare it in the main service's `depends_on`.
 
 ### Custom env overrides
 
