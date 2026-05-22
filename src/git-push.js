@@ -1,10 +1,18 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs } from './utils.js';
+import { parseArgs } from 'node:util';
 
 export async function main(argv = process.argv.slice(2)) {
-	const args = parseArgs(argv, { required: ['message'] });
+	const { values: args } = parseArgs({
+		args: argv,
+		options: {
+			message: { type: 'string' },
+			paths: { type: 'string' },
+			all: { type: 'boolean' },
+		},
+	});
+	if (!args['message']) throw new Error('Missing required arg: --message');
 	function run(cmd, cmdArgs) {
 		console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
 		return execFileSync(cmd, cmdArgs, { stdio: 'inherit' });

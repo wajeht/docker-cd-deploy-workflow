@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs } from './utils.js';
+import { parseArgs } from 'node:util';
 
 function createGitHubApi(token, repo) {
 	const apiBase = `https://api.github.com/repos/${repo}`;
@@ -122,7 +122,23 @@ async function cleanupDeployments(githubApi, args) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
-	const args = parseArgs(argv, { required: ['token', 'repo', 'action', 'environment'] });
+	const { values: args } = parseArgs({
+		args: argv,
+		options: {
+			token: { type: 'string' },
+			repo: { type: 'string' },
+			action: { type: 'string' },
+			environment: { type: 'string' },
+			ref: { type: 'string' },
+			production: { type: 'string' },
+			url: { type: 'string' },
+			'deployment-id': { type: 'string' },
+			'skip-health-check': { type: 'string' },
+		},
+	});
+	for (const key of ['token', 'repo', 'action', 'environment']) {
+		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
+	}
 	const action = args['action'];
 	const githubApi = createGitHubApi(args['token'], args['repo']);
 

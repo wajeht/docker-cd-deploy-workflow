@@ -1,10 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs } from './utils.js';
+import { parseArgs } from 'node:util';
 
 export async function main(argv = process.argv.slice(2)) {
-	const args = parseArgs(argv, { required: ['app-path', 'pr-number'] });
+	const { values: args } = parseArgs({
+		args: argv,
+		options: {
+			'app-path': { type: 'string' },
+			'pr-number': { type: 'string' },
+		},
+	});
+	for (const key of ['app-path', 'pr-number']) {
+		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
+	}
 	const appPath = args['app-path'];
 	const prNumber = args['pr-number'];
 	const tempPath = `${appPath}-pr-${prNumber}`;

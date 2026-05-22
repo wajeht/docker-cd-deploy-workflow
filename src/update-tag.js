@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import yaml from 'js-yaml';
-import { parseArgs } from './utils.js';
 
 function isObject(value) {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -102,7 +102,18 @@ export function updateComposeImageTag(content, { serviceName, repo, tag }) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
-	const args = parseArgs(argv, { required: ['app-path', 'service-name', 'tag', 'repo'] });
+	const { values: args } = parseArgs({
+		args: argv,
+		options: {
+			'app-path': { type: 'string' },
+			'service-name': { type: 'string' },
+			tag: { type: 'string' },
+			repo: { type: 'string' },
+		},
+	});
+	for (const key of ['app-path', 'service-name', 'tag', 'repo']) {
+		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
+	}
 	const { 'app-path': appPath, 'service-name': serviceName, tag, repo } = args;
 	const composePath = path.join(appPath, 'docker-compose.yml');
 	const content = fs.readFileSync(composePath, 'utf8');
