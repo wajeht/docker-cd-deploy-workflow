@@ -1,8 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
-import { parseArgs, detectHost, dependentServices } from './utils.js';
+import {
+	appendGithubOutput,
+	parseArgs,
+	detectHost,
+	dependentServices,
+	runMain,
+	tempStackPath,
+} from './utils.js';
 
 function serviceNetworkNames(service) {
 	if (Array.isArray(service.networks)) {
@@ -159,7 +165,7 @@ export async function main(argv = process.argv.slice(2)) {
 	const prNumber = args['pr-number'];
 	const repoOwner = args['repo-owner'];
 	const appName = path.basename(appPath);
-	const tempPath = `${appPath}-pr-${prNumber}`;
+	const tempPath = tempStackPath(appPath, prNumber);
 
 	fs.rmSync(tempPath, { recursive: true, force: true });
 	fs.cpSync(appPath, tempPath, { recursive: true });
@@ -187,16 +193,8 @@ export async function main(argv = process.argv.slice(2)) {
 	console.log('--- docker-compose.yml ---');
 	console.log(fs.readFileSync(composePath, 'utf8'));
 
-	const outputFile = process.env.GITHUB_OUTPUT;
-	if (outputFile) {
-		fs.appendFileSync(outputFile, `url=${result.url}\n`);
-		fs.appendFileSync(outputFile, `temp-path=${tempPath}\n`);
-	}
+	appendGithubOutput('url', result.url);
+	appendGithubOutput('temp-path', tempPath);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-	main().catch((err) => {
-		console.error(err.message);
-		process.exit(1);
-	});
-}
+runMain(import.meta.url, main);

@@ -41,7 +41,7 @@ jobs:
 
       - name: Remove temp stack
         run: |
-          node .deploy-workflow/src/cleanup.js \
+          node .deploy-workflow/src/temp-cleanup.js \
             --app-path "${{ inputs.app-path }}" \
             --pr-number "${{ github.event.pull_request.number }}"
 

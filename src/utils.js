@@ -1,3 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export function isObject(value) {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function parseArgs(argv, { required = [] } = {}) {
 	const result = {};
 	for (let i = 0; i < argv.length; i++) {
@@ -9,11 +17,34 @@ export function parseArgs(argv, { required = [] } = {}) {
 	}
 	for (const key of required) {
 		if (!result[key]) {
-			console.error(`Missing required arg: --${key}`);
-			process.exit(1);
+			throw new Error(`Missing required arg: --${key}`);
 		}
 	}
 	return result;
+}
+
+export function isMain(importMetaUrl) {
+	return Boolean(process.argv[1]) && fileURLToPath(importMetaUrl) === path.resolve(process.argv[1]);
+}
+
+export function runMain(importMetaUrl, main) {
+	if (!isMain(importMetaUrl)) return;
+
+	main().catch((err) => {
+		console.error(err.message);
+		process.exit(1);
+	});
+}
+
+export function appendGithubOutput(name, value) {
+	const outputFile = process.env.GITHUB_OUTPUT;
+	if (!outputFile) return;
+
+	fs.appendFileSync(outputFile, `${name}=${value}\n`);
+}
+
+export function tempStackPath(appPath, prNumber) {
+	return `${appPath}-pr-${prNumber}`;
 }
 
 // Collect all Host() values from traefik labels

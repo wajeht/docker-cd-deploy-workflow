@@ -24,10 +24,11 @@ Node.js (ESM), uses `js-yaml` for YAML parsing.
 | Script | Used by | Description |
 |--------|---------|-------------|
 | `src/update-tag.js` | `deploy.yaml` | Updates `ghcr.io` image tag in a compose file |
-| `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites for temp env |
+| `src/temp-compose.js` | `temp-deploy.yaml` | Builds the temp deploy compose file |
 | `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates/cleans up GitHub Deployments for PR environments |
+| `src/temp-cleanup.js` | `temp-cleanup.yaml` | Removes the temp deploy app directory |
 | `src/git-push.js` | all deploy workflows | Commits and pushes with retry on conflict |
-| `src/utils.js` | all | Shared helpers (`parseArgs`, `createGitHubApi`) |
+| `src/utils.js` | all | Shared helpers (`parseArgs`, `runMain`, `createGitHubApi`) |
 
 ## Deploy
 
@@ -103,7 +104,7 @@ Close PR or remove label
 
 ### What gets rewritten
 
-The `src/rewrite-compose.js` script copies the prod app directory and modifies:
+The `src/temp-compose.js` script copies the prod app directory and modifies:
 
 - **Service set** — keeps `service-name` plus its recursive `depends_on` services, and removes sibling services that the app does not need
 - **Image tag** — only `ghcr.io/<owner>/*` images, third-party images (postgres, redis) stay untouched

@@ -6,11 +6,11 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
-import { rewriteComposeForTempDeploy } from './rewrite-compose.js';
+import { rewriteComposeForTempDeploy } from './temp-compose.js';
 
-const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'rewrite-compose.js');
+const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'temp-compose.js');
 
-describe('rewrite-compose', () => {
+describe('temp-compose', () => {
 	it('uses service-name as the dependency root and router prefix', () => {
 		const result = rewriteComposeForTempDeploy(
 			{

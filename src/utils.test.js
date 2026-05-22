@@ -1,6 +1,42 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { detectHost, collectHosts, dependentServices, dependsOnServices } from './utils.js';
+import {
+	detectHost,
+	collectHosts,
+	dependentServices,
+	dependsOnServices,
+	isObject,
+	parseArgs,
+	tempStackPath,
+} from './utils.js';
+
+describe('parseArgs', () => {
+	it('parses flags and values', () => {
+		assert.deepStrictEqual(parseArgs(['--app-path', 'apps/demo', '--all']), {
+			'app-path': 'apps/demo',
+			all: true,
+		});
+	});
+
+	it('throws when required args are missing', () => {
+		assert.throws(() => parseArgs([], { required: ['app-path'] }), /Missing required arg: --app-path/);
+	});
+});
+
+describe('isObject', () => {
+	it('returns true only for plain object-like values', () => {
+		assert.strictEqual(isObject({}), true);
+		assert.strictEqual(isObject([]), false);
+		assert.strictEqual(isObject(null), false);
+		assert.strictEqual(isObject('value'), false);
+	});
+});
+
+describe('tempStackPath', () => {
+	it('builds the temp stack path from app path and PR number', () => {
+		assert.strictEqual(tempStackPath('apps/demo', '42'), 'apps/demo-pr-42');
+	});
+});
 
 describe('collectHosts', () => {
 	it('collects all unique hosts from labels', () => {
@@ -143,47 +179,5 @@ describe('dependentServices', () => {
 
 	it('returns an empty set when the app service is missing', () => {
 		assert.deepStrictEqual([...dependentServices({ db: { image: 'postgres' } }, 'web')], []);
-	});
-});
-
-describe('label rewriting (integration)', () => {
-	it('replaces all hosts and strips redirect labels for closepowerlifting', () => {
-		const labels = [
-			'traefik.enable=true',
-			'traefik.http.routers.close-powerlifting.rule=Host(`closepowerlifting.com`) || Host(`www.closepowerlifting.com`)',
-			'traefik.http.routers.close-powerlifting.entrypoints=websecure',
-			'traefik.http.routers.close-powerlifting.middlewares=rate-limit-global@file',
-			'traefik.http.services.close-powerlifting.loadbalancer.server.port=80',
-			'traefik.http.routers.close-powerlifting-redirect.rule=Host(`close-powerlifting.jaw.dev`)',
-			'traefik.http.routers.close-powerlifting-redirect.entrypoints=websecure',
-			'traefik.http.routers.close-powerlifting-redirect.middlewares=close-powerlifting-redirect',
-			'traefik.http.routers.close-powerlifting-redirect.service=noop@internal',
-			'traefik.http.middlewares.close-powerlifting-redirect.redirectregex.regex=^https?://close-powerlifting\\.jaw\\.dev(.*)$',
-			'traefik.http.middlewares.close-powerlifting-redirect.redirectregex.replacement=https://closepowerlifting.com$1',
-			'traefik.http.middlewares.close-powerlifting-redirect.redirectregex.permanent=true',
-		];
-
-		const services = { app: { labels } };
-		const allHosts = collectHosts(services);
-		const appName = 'close-powerlifting';
-		const tempName = 'close-powerlifting-pr-148';
-		const hostname = 'pr-148-close-powerlifting.jaw.dev';
-
-		const rewritten = labels
-			.filter((label) => !label.includes('redirect'))
-			.map((label) =>
-				label
-					.replaceAll(`traefik.http.routers.${appName}`, `traefik.http.routers.${tempName}`)
-					.replaceAll(`traefik.http.services.${appName}`, `traefik.http.services.${tempName}`)
-					.replace(/Host\(`[^`]+`\)/g, `Host(\`${hostname}\`)`),
-			);
-
-		assert.deepStrictEqual(rewritten, [
-			'traefik.enable=true',
-			`traefik.http.routers.close-powerlifting-pr-148.rule=Host(\`pr-148-close-powerlifting.jaw.dev\`) || Host(\`pr-148-close-powerlifting.jaw.dev\`)`,
-			'traefik.http.routers.close-powerlifting-pr-148.entrypoints=websecure',
-			'traefik.http.routers.close-powerlifting-pr-148.middlewares=rate-limit-global@file',
-			'traefik.http.services.close-powerlifting-pr-148.loadbalancer.server.port=80',
-		]);
 	});
 });

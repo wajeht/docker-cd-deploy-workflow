@@ -76,7 +76,7 @@ jobs:
       - name: Rewrite compose for temp deploy
         id: rewrite
         run: |
-          node .deploy-workflow/src/rewrite-compose.js \
+          node .deploy-workflow/src/temp-compose.js \
             --app-path "${{ inputs.app-path }}" \
             --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \

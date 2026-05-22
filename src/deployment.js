@@ -1,5 +1,4 @@
-import fs from 'node:fs';
-import { parseArgs, createGitHubApi } from './utils.js';
+import { appendGithubOutput, parseArgs, createGitHubApi, runMain } from './utils.js';
 
 async function requestDeployment(githubApi, args) {
 	const environment = args['environment'];
@@ -28,10 +27,7 @@ async function requestDeployment(githubApi, args) {
 
 	console.log(`Requested deployment ${deployment.id} for ${environment}`);
 
-	const outputFile = process.env.GITHUB_OUTPUT;
-	if (outputFile) {
-		fs.appendFileSync(outputFile, `deployment-id=${deployment.id}\n`);
-	}
+	appendGithubOutput('deployment-id', deployment.id);
 }
 
 async function markDeploymentSuccess(githubApi, args) {
@@ -117,7 +113,4 @@ export async function main(argv = process.argv.slice(2)) {
 	}
 }
 
-main().catch((err) => {
-	console.error(err.message);
-	process.exit(1);
-});
+runMain(import.meta.url, main);

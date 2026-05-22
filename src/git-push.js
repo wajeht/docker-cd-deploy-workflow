@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { parseArgs } from './utils.js';
+import { parseArgs, runMain } from './utils.js';
 
 const run = (cmd, cmdArgs) => {
 	console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
@@ -54,7 +54,4 @@ export async function main(argv = process.argv.slice(2)) {
 	}
 }
 
-main().catch((err) => {
-	console.error(err.message);
-	process.exit(1);
-});
+runMain(import.meta.url, main);

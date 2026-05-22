@@ -1,12 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
-import { parseArgs } from './utils.js';
-
-function isObject(value) {
-	return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
+import { isObject, parseArgs, runMain } from './utils.js';
 
 function escapeRegExp(value) {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -117,9 +112,4 @@ export async function main(argv = process.argv.slice(2)) {
 	console.log(`Updated ${serviceName} to ${result.image} in ${composePath}`);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-	main().catch((err) => {
-		console.error(err.message);
-		process.exit(1);
-	});
-}
+runMain(import.meta.url, main);
