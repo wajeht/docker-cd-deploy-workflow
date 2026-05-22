@@ -107,7 +107,7 @@ The `src/rewrite-compose.js` script copies the full prod stack and modifies:
 - **Borgmatic services** — stripped (backup not needed in temp envs)
 - **container_name** — stripped (avoids naming conflicts with prod containers)
 - **docker-cd.yml** — forces `rolling_update: false`
-- **env overrides** — if `.env.sops` exists in the app repo's PR branch, overwrites the home-ops `.env.sops` (per-PR secrets)
+- **env overrides** — if `.env.sops` exists in the app repo's PR branch, copies it into the temp stack as `.env.sops.override` so docker-cd merges it over the home-ops base `.env.sops`
 
 Everything else is preserved: healthchecks, networks, resource limits, security settings.
 
@@ -129,7 +129,11 @@ rm .env.sops.yaml
 git add .env.sops && git commit -m "add temp deploy env overrides"
 ```
 
-The temp deploy workflow checks out `.env.sops` from the PR branch and copies it into the temp stack, overwriting the home-ops version. docker-cd decrypts it as usual. Each PR can have different secrets.
+The temp deploy workflow checks out `.env.sops` from the PR branch and copies it
+into the temp stack as `.env.sops.override`. docker-cd decrypts the home-ops
+base `.env.sops`, decrypts the override, and merges override values on top. This
+keeps production-only vars from home-ops while allowing each PR to override the
+values it needs.
 
 ### Prerequisites
 
