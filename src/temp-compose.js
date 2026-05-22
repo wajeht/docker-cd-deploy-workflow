@@ -2,13 +2,58 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
-import {
-	appendGithubOutput,
-	parseArgs,
-	detectHost,
-	dependentServices,
-	tempStackPath,
-} from './utils.js';
+import { parseArgs } from './utils.js';
+
+export function collectHosts(services) {
+	const allHosts = [];
+	for (const [, service] of Object.entries(services)) {
+		if (!service.labels) continue;
+		for (const label of service.labels) {
+			for (const match of label.matchAll(/Host\(`([^`]+)`\)/g)) {
+				if (!allHosts.includes(match[1])) allHosts.push(match[1]);
+			}
+		}
+	}
+	return allHosts;
+}
+
+export function detectHost(services) {
+	const allHosts = collectHosts(services);
+	return allHosts.find((h) => h.split('.').length >= 3 && !h.startsWith('www.')) || allHosts.find((h) => h.split('.').length >= 3) || allHosts[0] || null;
+}
+
+export function dependsOnServices(service) {
+	const dependsOn = service?.depends_on;
+	if (Array.isArray(dependsOn)) {
+		return dependsOn.filter((name) => typeof name === 'string');
+	}
+	if (dependsOn && typeof dependsOn === 'object') {
+		return Object.keys(dependsOn);
+	}
+	return [];
+}
+
+export function dependentServices(services, rootService) {
+	if (!services || !Object.hasOwn(services, rootService)) {
+		return new Set();
+	}
+
+	const selected = new Set([rootService]);
+	const pending = [rootService];
+
+	while (pending.length > 0) {
+		const serviceName = pending.pop();
+		for (const dependency of dependsOnServices(services[serviceName])) {
+			if (!Object.hasOwn(services, dependency) || selected.has(dependency)) {
+				continue;
+			}
+			selected.add(dependency);
+			pending.push(dependency);
+		}
+	}
+
+	return selected;
+}
 
 function serviceNetworkNames(service) {
 	if (Array.isArray(service.networks)) {
@@ -165,7 +210,7 @@ export async function main(argv = process.argv.slice(2)) {
 	const prNumber = args['pr-number'];
 	const repoOwner = args['repo-owner'];
 	const appName = path.basename(appPath);
-	const tempPath = tempStackPath(appPath, prNumber);
+	const tempPath = `${appPath}-pr-${prNumber}`;
 
 	fs.rmSync(tempPath, { recursive: true, force: true });
 	fs.cpSync(appPath, tempPath, { recursive: true });
@@ -193,8 +238,11 @@ export async function main(argv = process.argv.slice(2)) {
 	console.log('--- docker-compose.yml ---');
 	console.log(fs.readFileSync(composePath, 'utf8'));
 
-	appendGithubOutput('url', result.url);
-	appendGithubOutput('temp-path', tempPath);
+	const outputFile = process.env.GITHUB_OUTPUT;
+	if (outputFile) {
+		fs.appendFileSync(outputFile, `url=${result.url}\n`);
+		fs.appendFileSync(outputFile, `temp-path=${tempPath}\n`);
+	}
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

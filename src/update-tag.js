@@ -2,7 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
-import { isObject, parseArgs } from './utils.js';
+import { parseArgs } from './utils.js';
+
+function isObject(value) {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 
 function escapeRegExp(value) {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

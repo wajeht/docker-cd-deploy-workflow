@@ -1,6 +1,24 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appendGithubOutput, parseArgs, createGitHubApi } from './utils.js';
+import { parseArgs } from './utils.js';
+
+function createGitHubApi(token, repo) {
+	const apiBase = `https://api.github.com/repos/${repo}`;
+	const headers = {
+		Authorization: `Bearer ${token}`,
+		Accept: 'application/vnd.github+json',
+		'Content-Type': 'application/json',
+		'X-GitHub-Api-Version': '2022-11-28',
+	};
+
+	return async function githubApi(path, options = {}) {
+		const res = await fetch(`${apiBase}${path}`, { headers, ...options });
+		if (!res.ok) {
+			throw new Error(`GitHub API ${options.method || 'GET'} ${path}: ${res.status} ${await res.text()}`);
+		}
+		return res;
+	};
+}
 
 async function requestDeployment(githubApi, args) {
 	const environment = args['environment'];
@@ -29,7 +47,10 @@ async function requestDeployment(githubApi, args) {
 
 	console.log(`Requested deployment ${deployment.id} for ${environment}`);
 
-	appendGithubOutput('deployment-id', deployment.id);
+	const outputFile = process.env.GITHUB_OUTPUT;
+	if (outputFile) {
+		fs.appendFileSync(outputFile, `deployment-id=${deployment.id}\n`);
+	}
 }
 
 async function markDeploymentSuccess(githubApi, args) {

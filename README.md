@@ -28,7 +28,7 @@ Node.js (ESM), uses `js-yaml` for YAML parsing.
 | `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates/cleans up GitHub Deployments for PR environments |
 | `src/temp-cleanup.js` | `temp-cleanup.yaml` | Removes the temp deploy app directory |
 | `src/git-push.js` | all deploy workflows | Commits and pushes with retry on conflict |
-| `src/utils.js` | all | Shared helpers (`parseArgs`, `runMain`, `createGitHubApi`) |
+| `src/utils.js` | all | Shared argument parsing helper |
 
 ## Deploy
 
