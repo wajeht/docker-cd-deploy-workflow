@@ -1,112 +1,161 @@
-import { parseArgs, createGitHubApi } from './utils.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
-const args = parseArgs(process.argv.slice(2), { required: ['token', 'repo', 'action', 'environment'] });
+function createGitHubApi(token, repo) {
+	const apiBase = `https://api.github.com/repos/${repo}`;
+	const headers = {
+		Authorization: `Bearer ${token}`,
+		Accept: 'application/vnd.github+json',
+		'Content-Type': 'application/json',
+		'X-GitHub-Api-Version': '2022-11-28',
+	};
 
-const action = args['action'];
-const environment = args['environment'];
-const url = args['url'];
-const ref = args['ref'] || 'main';
-const production = args['production'] === 'true';
+	return async function githubApi(path, options = {}) {
+		const res = await fetch(`${apiBase}${path}`, { headers, ...options });
+		if (!res.ok) {
+			throw new Error(`GitHub API ${options.method || 'GET'} ${path}: ${res.status} ${await res.text()}`);
+		}
+		return res;
+	};
+}
 
-const githubApi = createGitHubApi(args['token'], args['repo']);
+async function requestDeployment(githubApi, args) {
+	const environment = args['environment'];
+	const ref = args['ref'] || 'main';
+	const production = args['production'] === 'true';
+	const res = await githubApi('/deployments', {
+		method: 'POST',
+		body: JSON.stringify({
+			ref,
+			environment,
+			auto_merge: false,
+			required_contexts: [],
+			transient_environment: !production,
+			production_environment: production,
+		}),
+	});
+	const deployment = await res.json();
 
-try {
-	if (action === 'request') {
-		const res = await githubApi('/deployments', {
-			method: 'POST',
-			body: JSON.stringify({
-				ref,
-				environment,
-				auto_merge: false,
-				required_contexts: [],
-				transient_environment: !production,
-				production_environment: production,
-			}),
-		});
-		const deployment = await res.json();
+	await githubApi(`/deployments/${deployment.id}/statuses`, {
+		method: 'POST',
+		body: JSON.stringify({
+			state: 'in_progress',
+			description: 'Deploying temp environment',
+		}),
+	});
 
+	console.log(`Requested deployment ${deployment.id} for ${environment}`);
+
+	const outputFile = process.env.GITHUB_OUTPUT;
+	if (outputFile) {
+		fs.appendFileSync(outputFile, `deployment-id=${deployment.id}\n`);
+	}
+}
+
+async function markDeploymentSuccess(githubApi, args) {
+	const environment = args['environment'];
+	const url = args['url'];
+	const deploymentId = args['deployment-id'];
+	const skipHealthCheck = args['skip-health-check'] === 'true';
+	if (!url || !deploymentId) {
+		throw new Error('--url and --deployment-id are required for deploy action');
+	}
+
+	let description;
+	if (skipHealthCheck) {
+		description = 'Deploy committed, docker-cd will pick it up';
+		console.log(description);
+	} else {
+		let healthy = false;
+		console.log(`Waiting up to 120s for ${url}...`);
+		for (let i = 1; i <= 24; i++) {
+			try {
+				const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+				console.log(`Attempt ${i}/24: HTTP ${res.status}`);
+				if (res.ok) {
+					healthy = true;
+					break;
+				}
+			} catch {
+				console.log(`Attempt ${i}/24: not reachable`);
+			}
+			if (i < 24) await new Promise((r) => setTimeout(r, 5000));
+		}
+		description = healthy ? 'Temp deploy is ready' : 'Temp deploy will be ready in a few seconds';
+		console.log(description);
+	}
+
+	await githubApi(`/deployments/${deploymentId}/statuses`, {
+		method: 'POST',
+		body: JSON.stringify({
+			state: 'success',
+			environment_url: url,
+			description,
+		}),
+	});
+
+	console.log(`Deployment ${deploymentId} for ${environment} -> ${url}`);
+}
+
+async function cleanupDeployments(githubApi, args) {
+	const environment = args['environment'];
+	const res = await githubApi(`/deployments?environment=${encodeURIComponent(environment)}&per_page=100`);
+	const deployments = await res.json();
+
+	for (const deployment of deployments) {
 		await githubApi(`/deployments/${deployment.id}/statuses`, {
 			method: 'POST',
 			body: JSON.stringify({
-				state: 'in_progress',
-				description: 'Deploying temp environment',
+				state: 'inactive',
+				description: 'Temp deploy removed',
 			}),
 		});
 
-		console.log(`Requested deployment ${deployment.id} for ${environment}`);
-
-		const outputFile = process.env.GITHUB_OUTPUT;
-		if (outputFile) {
-			const fs = await import('node:fs');
-			fs.appendFileSync(outputFile, `deployment-id=${deployment.id}\n`);
-		}
-	} else if (action === 'deploy') {
-		const deploymentId = args['deployment-id'];
-		const skipHealthCheck = args['skip-health-check'] === 'true';
-		if (!url || !deploymentId) {
-			console.error('--url and --deployment-id are required for deploy action');
-			process.exit(1);
-		}
-
-		let description;
-		if (skipHealthCheck) {
-			description = 'Deploy committed, docker-cd will pick it up';
-			console.log(description);
-		} else {
-			// Poll URL for up to 120s before marking success
-			let healthy = false;
-			console.log(`Waiting up to 120s for ${url}...`);
-			for (let i = 1; i <= 24; i++) {
-				try {
-					const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-					console.log(`Attempt ${i}/24: HTTP ${res.status}`);
-					if (res.ok) {
-						healthy = true;
-						break;
-					}
-				} catch {
-					console.log(`Attempt ${i}/24: not reachable`);
-				}
-				if (i < 24) await new Promise((r) => setTimeout(r, 5000));
-			}
-			description = healthy ? 'Temp deploy is ready' : 'Temp deploy will be ready in a few seconds';
-			console.log(description);
-		}
-
-		await githubApi(`/deployments/${deploymentId}/statuses`, {
-			method: 'POST',
-			body: JSON.stringify({
-				state: 'success',
-				environment_url: url,
-				description,
-			}),
+		await githubApi(`/deployments/${deployment.id}`, {
+			method: 'DELETE',
 		});
-
-		console.log(`Deployment ${deploymentId} for ${environment} -> ${url}`);
-	} else if (action === 'cleanup') {
-		const res = await githubApi(`/deployments?environment=${encodeURIComponent(environment)}&per_page=100`);
-		const deployments = await res.json();
-
-		for (const deployment of deployments) {
-			await githubApi(`/deployments/${deployment.id}/statuses`, {
-				method: 'POST',
-				body: JSON.stringify({
-					state: 'inactive',
-					description: 'Temp deploy removed',
-				}),
-			});
-
-			await githubApi(`/deployments/${deployment.id}`, {
-				method: 'DELETE',
-			});
-		}
-
-		console.log(`Cleaned up ${deployments.length} deployment(s) for ${environment}`);
-	} else {
-		console.error(`Unknown action: ${action}`);
-		process.exit(1);
 	}
-} catch (err) {
-	console.error(err.message);
-	process.exit(1);
+
+	console.log(`Cleaned up ${deployments.length} deployment(s) for ${environment}`);
+}
+
+export async function main(argv = process.argv.slice(2)) {
+	const { values: args } = parseArgs({
+		args: argv,
+		options: {
+			token: { type: 'string' },
+			repo: { type: 'string' },
+			action: { type: 'string' },
+			environment: { type: 'string' },
+			ref: { type: 'string' },
+			production: { type: 'string' },
+			url: { type: 'string' },
+			'deployment-id': { type: 'string' },
+			'skip-health-check': { type: 'string' },
+		},
+	});
+	for (const key of ['token', 'repo', 'action', 'environment']) {
+		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
+	}
+	const action = args['action'];
+	const githubApi = createGitHubApi(args['token'], args['repo']);
+
+	if (action === 'request') {
+		await requestDeployment(githubApi, args);
+	} else if (action === 'deploy') {
+		await markDeploymentSuccess(githubApi, args);
+	} else if (action === 'cleanup') {
+		await cleanupDeployments(githubApi, args);
+	} else {
+		throw new Error(`Unknown action: ${action}`);
+	}
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+	main().catch((err) => {
+		console.error(err.message);
+		process.exit(1);
+	});
 }

@@ -19,15 +19,15 @@ App repo pushes to main
 
 ## Scripts
 
-Node.js (ESM), uses `js-yaml` for YAML parsing.
+Node.js 26 (ESM), uses `js-yaml` for YAML parsing.
 
 | Script | Used by | Description |
 |--------|---------|-------------|
 | `src/update-tag.js` | `deploy.yaml` | Updates `ghcr.io` image tag in a compose file |
-| `src/rewrite-compose.js` | `temp-deploy.yaml` | Copies app stack, rewrites for temp env, strips borgmatic |
+| `src/temp-compose.js` | `temp-deploy.yaml` | Builds the temp deploy compose file |
 | `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates/cleans up GitHub Deployments for PR environments |
+| `src/temp-cleanup.js` | `temp-cleanup.yaml` | Removes the temp deploy app directory |
 | `src/git-push.js` | all deploy workflows | Commits and pushes with retry on conflict |
-| `src/utils.js` | all | Shared helpers (`parseArgs`, `createGitHubApi`) |
 
 ## Deploy
 
@@ -39,6 +39,7 @@ jobs:
     uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.18
     with:
       app-path: apps/your-app
+      service-name: your-app
       tag: ${{ needs.build.outputs.tag }}
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -51,6 +52,7 @@ With custom URL (for apps not on `*.jaw.dev`):
     uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.18
     with:
       app-path: apps/close-powerlifting
+      service-name: close-powerlifting
       tag: ${{ needs.build.outputs.tag }}
       url: https://closepowerlifting.com
     secrets:
@@ -63,6 +65,7 @@ With custom URL (for apps not on `*.jaw.dev`):
 |-------|----------|---------|-------------|
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Path to app dir (e.g., `apps/bang`) |
+| `service-name` | Yes | - | Compose service to update (e.g., `bang`) |
 | `tag` | Yes | - | Image tag |
 | `url` | No | `https://<repo-name>.jaw.dev` | Production URL shown in GitHub Deployments |
 
@@ -81,8 +84,9 @@ Temporary PR-based environments. Each PR gets its own live instance.
 Add `temp-deploy` label to PR
     → Builds image from PR branch
     → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
+    → Keeps only <app> and its recursive depends_on services
     → Rewrites image tag, traefik labels, converts bind mounts to named volumes
-    → Strips borgmatic services and container_name
+    → Strips container_name
     → docker-cd deploys to pr-<N>-<app>.jaw.dev
     → Creates GitHub Deployment with "View deployment" link
 
@@ -99,17 +103,19 @@ Close PR or remove label
 
 ### What gets rewritten
 
-The `src/rewrite-compose.js` script copies the full prod stack and modifies:
+The `src/temp-compose.js` script copies the prod app directory and modifies:
 
+- **Service set** — keeps `service-name` plus its recursive `depends_on` services, and removes sibling services that the app does not need
 - **Image tag** — only `ghcr.io/<owner>/*` images, third-party images (postgres, redis) stay untouched
 - **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
 - **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
-- **Borgmatic services** — stripped (backup not needed in temp envs)
+- **Networks/volumes** — top-level declarations unused by the kept services are removed
 - **container_name** — stripped (avoids naming conflicts with prod containers)
 - **docker-cd.yml** — forces `rolling_update: false`
 - **env overrides** — if `.env.sops` exists in the app repo's PR branch, copies it into the temp stack as `.env.sops.override` so docker-cd merges it over the home-ops base `.env.sops`
 
-Everything else is preserved: healthchecks, networks, resource limits, security settings.
+Everything else on the kept services is preserved: healthchecks, resource limits, security settings.
+If a temp deploy needs a database, redis, or another local service, declare it in the main service's `depends_on`.
 
 ### Custom env overrides
 
@@ -204,6 +210,7 @@ jobs:
     uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.18
     with:
       app-path: apps/your-app    # change this
+      service-name: your-app     # change this
       tag: ${{ needs.temp-build.outputs.tag }}
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -228,6 +235,7 @@ jobs:
 |-------|----------|---------|-------------|
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
+| `service-name` | Yes | - | Compose service to deploy (e.g., `bang`) |
 | `tag` | Yes | - | Image tag |
 
 ### Temp Cleanup Inputs
