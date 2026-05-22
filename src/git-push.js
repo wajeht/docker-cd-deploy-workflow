@@ -3,13 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from './utils.js';
 
-const run = (cmd, cmdArgs) => {
-	console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
-	return execFileSync(cmd, cmdArgs, { stdio: 'inherit' });
-};
-
-export async function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2), exec = execFileSync) {
 	const args = parseArgs(argv, { required: ['message'] });
+	const run = (cmd, cmdArgs) => {
+		console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
+		return exec(cmd, cmdArgs, { stdio: 'inherit' });
+	};
 
 	if (!args['paths'] && !args['all']) {
 		throw new Error('Missing required arg: --paths or --all');
@@ -33,7 +32,7 @@ export async function main(argv = process.argv.slice(2)) {
 	}
 
 	try {
-		execFileSync('git', ['diff', '--staged', '--quiet']);
+		exec('git', ['diff', '--staged', '--quiet']);
 		console.log('No changes to commit');
 		return;
 	} catch {
