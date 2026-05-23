@@ -3,40 +3,23 @@
 Reusable GitHub Actions workflows for [docker-cd](https://github.com/wajeht/docker-cd) deployments.
 
 ```
-App repo pushes to main
-    → GitHub Actions builds image to ghcr.io
-    → deploy.yaml updates image tag in home-ops
-    → docker-cd detects change and deploys
+App repo builds image to ghcr.io
+    -> deploy.yaml updates home-ops
+    -> docker-cd deploys the changed stack
 ```
 
 ## Workflows
 
-| Workflow | Trigger | Description |
-|----------|---------|-------------|
-| `deploy.yaml` | Push to main | Updates image tag in home-ops, creates GitHub Deployment |
-| `temp-deploy.yaml` | PR labeled `temp-deploy` / new commits | Creates temporary PR environment |
-| `temp-cleanup.yaml` | PR closed / label removed | Removes temporary PR environment |
+- `deploy.yaml` updates a production image tag in home-ops.
+- `temp-deploy.yaml` creates temporary PR environments.
+- `temp-cleanup.yaml` removes temporary PR environments.
 
-## Scripts
-
-Node.js 26 (ESM), uses `js-yaml` for YAML parsing.
-
-| Script | Used by | Description |
-|--------|---------|-------------|
-| `src/update-tag.js` | `deploy.yaml` | Updates `ghcr.io` image tag in a compose file |
-| `src/temp-compose.js` | `temp-deploy.yaml` | Builds the temp deploy compose file |
-| `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates/cleans up GitHub Deployments for PR environments |
-| `src/temp-cleanup.js` | `temp-cleanup.yaml` | Removes the temp deploy app directory |
-| `src/git-push.js` | all deploy workflows | Commits and pushes with retry on conflict |
-
-## Deploy
-
-Updates the image tag for a single app in home-ops and tracks it as a GitHub Deployment.
+## Use
 
 ```yaml
 jobs:
   deploy:
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.18
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.21
     with:
       app-path: apps/your-app
       service-name: your-app
@@ -45,212 +28,12 @@ jobs:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
 ```
 
-With custom URL (for apps not on `*.jaw.dev`):
+## Docs
 
-```yaml
-  deploy:
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.18
-    with:
-      app-path: apps/close-powerlifting
-      service-name: close-powerlifting
-      tag: ${{ needs.build.outputs.tag }}
-      url: https://closepowerlifting.com
-    secrets:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
-```
-
-### Deploy Inputs
-
-| Input | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
-| `app-path` | Yes | - | Path to app dir (e.g., `apps/bang`) |
-| `service-name` | Yes | - | Compose service to update (e.g., `bang`) |
-| `tag` | Yes | - | Image tag |
-| `url` | No | `https://<repo-name>.jaw.dev` | Production URL shown in GitHub Deployments |
-
-### Deploy Tracking
-
-Uses native GitHub Actions `environment:` which gives you:
-- "production" entry in the repo's Deployments sidebar
-- Clickable URL link to the deployed app
-- Deploy queue (serialized via `concurrency: deploy-home-ops`)
-
-## Temp Deploys
-
-Temporary PR-based environments. Each PR gets its own live instance.
-
-```
-Add `temp-deploy` label to PR
-    → Builds image from PR branch
-    → Copies apps/<app>/ → apps/<app>-pr-<N>/ in home-ops
-    → Keeps only <app> and its recursive depends_on services
-    → Rewrites image tag, traefik labels, converts bind mounts to named volumes
-    → Strips container_name
-    → docker-cd deploys to pr-<N>-<app>.jaw.dev
-    → Creates GitHub Deployment with "View deployment" link
-
-Push new commits (with label present)
-    → Rebuilds image with new SHA
-    → Updates temp stack with new image
-    → docker-cd redeploys
-
-Close PR or remove label
-    → Removes apps/<app>-pr-<N>/ from home-ops
-    → Cleans up GitHub Deployment
-    → docker-cd garbage collects the stack
-```
-
-### What gets rewritten
-
-The `src/temp-compose.js` script copies the prod app directory and modifies:
-
-- **Service set** — keeps `service-name` plus its recursive `depends_on` services, and removes sibling services that the app does not need
-- **Image tag** — only `ghcr.io/<owner>/*` images, third-party images (postgres, redis) stay untouched
-- **Traefik labels** — router/service names and hostname rewritten to avoid conflicts with prod
-- **Volumes** — bind mounts (`/home/jaw/data/app/...`) converted to named Docker volumes (no permission issues, ephemeral)
-- **Networks/volumes** — top-level declarations unused by the kept services are removed
-- **container_name** — stripped (avoids naming conflicts with prod containers)
-- **docker-cd.yml** — forces `rolling_update: false`
-- **env overrides** — if `.env.sops` exists in the app repo's PR branch, copies it into the temp stack as `.env.sops.override` so docker-cd merges it over the home-ops base `.env.sops`
-
-Everything else on the kept services is preserved: healthchecks, resource limits, security settings.
-If a temp deploy needs a database, redis, or another local service, declare it in the main service's `depends_on`.
-
-### Custom env overrides
-
-To override env values for temp deploys, add `.env.sops` to the app repo's PR branch:
-
-```bash
-# Create your overrides
-cat > .env.sops.yaml << 'EOF'
-APP_ENV=staging
-APP_URL=pr-174-bang.jaw.dev
-STRIPE_KEY=sk_test_xxx
-EOF
-
-# Encrypt and commit to your PR branch
-sops -e .env.sops.yaml > .env.sops
-rm .env.sops.yaml
-git add .env.sops && git commit -m "add temp deploy env overrides"
-```
-
-The temp deploy workflow checks out `.env.sops` from the PR branch and copies it
-into the temp stack as `.env.sops.override`. docker-cd decrypts the home-ops
-base `.env.sops`, decrypts the override, and merges override values on top. This
-keeps production-only vars from home-ops while allowing each PR to override the
-values it needs.
-
-### Prerequisites
-
-1. Wildcard DNS for `*.jaw.dev` (Cloudflare)
-2. Wildcard TLS cert in Traefik (`*.jaw.dev`)
-3. `GH_TOKEN` secret with `repo` and `packages` scope
-4. Create `temp-deploy` label: `gh label create temp-deploy`
-
-### Setup
-
-Add `pull_request` types to your existing CI and append temp jobs:
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, closed]
-
-jobs:
-  # ... your existing test/lint/build/deploy jobs ...
-
-  temp-build:
-    name: Temp Build
-    if: >
-      (github.event.action == 'labeled' && github.event.label.name == 'temp-deploy') ||
-      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'temp-deploy'))
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.image-name.outputs.TAG }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GH_TOKEN }}
-
-      - name: Generate Image Name
-        id: image-name
-        run: |
-          TAG=$(echo ${{ github.event.pull_request.head.sha }} | cut -c1-7)
-          IMAGE_URL=$(echo ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:$TAG | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE_URL=$IMAGE_URL" >> $GITHUB_OUTPUT
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.image-name.outputs.IMAGE_URL }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  temp-deploy:
-    name: Temp Deploy
-    if: >
-      (github.event.action == 'labeled' && github.event.label.name == 'temp-deploy') ||
-      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'temp-deploy'))
-    needs: temp-build
-    permissions:
-      deployments: write
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.18
-    with:
-      app-path: apps/your-app    # change this
-      service-name: your-app     # change this
-      tag: ${{ needs.temp-build.outputs.tag }}
-    secrets:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
-  temp-cleanup:
-    name: Temp Cleanup
-    if: >
-      github.event.action == 'closed' ||
-      (github.event.action == 'unlabeled' && github.event.label.name == 'temp-deploy')
-    permissions:
-      deployments: write
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@v0.0.18
-    with:
-      app-path: apps/your-app    # change this
-    secrets:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
-```
-
-### Temp Deploy Inputs
-
-| Input | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
-| `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
-| `service-name` | Yes | - | Compose service to deploy (e.g., `bang`) |
-| `tag` | Yes | - | Image tag |
-
-### Temp Cleanup Inputs
-
-| Input | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
-| `app-path` | Yes | - | Base app path (e.g., `apps/bang`) |
-
-## Secrets
-
-| Secret | Required by | Description |
-|--------|-------------|-------------|
-| `GH_TOKEN` | All workflows | GitHub PAT with `repo` and `packages` scope |
+- [Deploy workflow](docs/deploy.md)
+- [Temp deploys](docs/temp-deploy.md)
+- [Workflow and script reference](docs/reference.md)
 
 ## License
 
-MIT
+Distributed under the MIT License © [wajeht](https://github.com/wajeht). See [LICENSE](./LICENSE) for more information.
