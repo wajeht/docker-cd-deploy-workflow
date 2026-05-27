@@ -4,7 +4,7 @@
 
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
-| `deploy.yaml` | Push to main | Updates image tag in home-ops and creates a GitHub Deployment |
+| `deploy.yaml` | Push to main | Updates the digest-pinned image tag in home-ops and creates a GitHub Deployment |
 | `temp-deploy.yaml` | PR labeled `temp-deploy` or new commits | Creates a temporary PR environment |
 | `temp-cleanup.yaml` | PR closed or label removed | Removes a temporary PR environment |
 
@@ -14,7 +14,7 @@ Node.js 26 ESM scripts. YAML parsing uses `js-yaml`.
 
 | Script | Used by | Description |
 |--------|---------|-------------|
-| `src/update-tag.js` | `deploy.yaml` | Updates a `ghcr.io` image tag in a compose file |
+| `src/update-tag.js` | `deploy.yaml` | Updates a `ghcr.io` image tag in a compose file, pinned to the digest |
 | `src/temp-compose.js` | `temp-deploy.yaml` | Builds the temp deploy compose file |
 | `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates or cleans up GitHub Deployments for PR environments |
 | `src/temp-cleanup.js` | `temp-cleanup.yaml` | Removes the temp deploy app directory |

@@ -10,7 +10,7 @@ App repo builds image to ghcr.io
 
 ## Workflows
 
-- `deploy.yaml` updates a production image tag in home-ops.
+- `deploy.yaml` updates a production image tag in home-ops, pinned to the image digest.
 - `temp-deploy.yaml` creates temporary PR environments.
 - `temp-cleanup.yaml` removes temporary PR environments.
 
@@ -19,7 +19,7 @@ App repo builds image to ghcr.io
 ```yaml
 jobs:
   deploy:
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.21
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.22
     with:
       app-path: apps/your-app
       service-name: your-app

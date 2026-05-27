@@ -89,7 +89,7 @@ jobs:
     needs: temp-build
     permissions:
       deployments: write
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.21
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.22
     with:
       app-path: apps/your-app
       service-name: your-app
@@ -104,7 +104,7 @@ jobs:
       (github.event.action == 'unlabeled' && github.event.label.name == 'temp-deploy')
     permissions:
       deployments: write
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@v0.0.21
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@v0.0.22
     with:
       app-path: apps/your-app
     secrets:

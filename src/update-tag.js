@@ -63,7 +63,7 @@ function replaceServiceImageLine(content, serviceName, image) {
 	throw new Error(`Service "${serviceName}" must define an image`);
 }
 
-export function updateComposeImageTag(content, { serviceName, repo, tag }) {
+export function updateComposeImageTag(content, { serviceName, repo, tag, digest }) {
 	const doc = yaml.load(content);
 	if (!isObject(doc) || !isObject(doc.services)) {
 		throw new Error('docker-compose.yml must contain a services block');
@@ -88,9 +88,9 @@ export function updateComposeImageTag(content, { serviceName, repo, tag }) {
 		};
 	}
 
-	const nextImage = `${repoName}:${tag}`;
+	const nextImage = `${repoName}:${tag}@${digest}`;
 	if (service.image === nextImage) {
-		return { changed: false, content, image: service.image, reason: `already at ${tag}` };
+		return { changed: false, content, image: service.image, reason: `already at ${nextImage}` };
 	}
 
 	return {
@@ -109,15 +109,16 @@ export async function main(argv = process.argv.slice(2)) {
 			'service-name': { type: 'string' },
 			tag: { type: 'string' },
 			repo: { type: 'string' },
+			digest: { type: 'string' },
 		},
 	});
-	for (const key of ['app-path', 'service-name', 'tag', 'repo']) {
+	for (const key of ['app-path', 'service-name', 'tag', 'repo', 'digest']) {
 		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
 	}
-	const { 'app-path': appPath, 'service-name': serviceName, tag, repo } = args;
+	const { 'app-path': appPath, 'service-name': serviceName, tag, repo, digest } = args;
 	const composePath = path.join(appPath, 'docker-compose.yml');
 	const content = fs.readFileSync(composePath, 'utf8');
-	const result = updateComposeImageTag(content, { serviceName, repo, tag });
+	const result = updateComposeImageTag(content, { serviceName, repo, tag, digest });
 
 	if (!result.changed) {
 		console.log(`No changes - ${result.reason}`);

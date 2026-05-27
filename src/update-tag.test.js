@@ -26,6 +26,7 @@ describe('updateComposeImageTag', () => {
 			serviceName: 'web',
 			repo: 'wajeht/web',
 			tag: 'new',
+			digest: 'sha256:def',
 		});
 
 		assert.strictEqual(result.changed, true);
@@ -35,7 +36,7 @@ describe('updateComposeImageTag', () => {
 				'# keep this comment',
 				'services:',
 				'  web:',
-				'    image: ghcr.io/wajeht/web:new',
+				'    image: ghcr.io/wajeht/web:new@sha256:def',
 				'  worker:',
 				'    image: ghcr.io/wajeht/web:old',
 				'',
@@ -50,9 +51,27 @@ describe('updateComposeImageTag', () => {
 			serviceName: 'web',
 			repo: 'wajeht/web',
 			tag: 'new',
+			digest: 'sha256:def',
 		});
 
-		assert.strictEqual(result.content, ['services:', '  web:', '    image: ghcr.io/wajeht/web:new', ''].join('\n'));
+		assert.strictEqual(
+			result.content,
+			['services:', '  web:', '    image: ghcr.io/wajeht/web:new@sha256:def', ''].join('\n'),
+		);
+	});
+
+	it('is a no-op when already at the tag and digest', () => {
+		const content = ['services:', '  web:', '    image: ghcr.io/wajeht/web:new@sha256:def', ''].join('\n');
+
+		const result = updateComposeImageTag(content, {
+			serviceName: 'web',
+			repo: 'wajeht/web',
+			tag: 'new',
+			digest: 'sha256:def',
+		});
+
+		assert.strictEqual(result.changed, false);
+		assert.strictEqual(result.content, content);
 	});
 
 	it('does not update a service with a different image repo', () => {
@@ -62,6 +81,7 @@ describe('updateComposeImageTag', () => {
 			serviceName: 'web',
 			repo: 'wajeht/web',
 			tag: 'new',
+			digest: 'sha256:def',
 		});
 
 		assert.strictEqual(result.changed, false);
@@ -75,6 +95,7 @@ describe('updateComposeImageTag', () => {
 					serviceName: 'web',
 					repo: 'wajeht/web',
 					tag: 'new',
+					digest: 'sha256:def',
 				}),
 			/Service "web" not found/,
 		);

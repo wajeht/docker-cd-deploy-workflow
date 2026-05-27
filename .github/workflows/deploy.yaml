@@ -59,13 +59,22 @@ jobs:
       - name: Install dependencies
         run: cd .deploy-workflow && npm ci
 
+      - name: Resolve image digest
+        id: digest
+        run: |
+          echo "${{ secrets.GH_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          image="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):${{ inputs.tag }}"
+          digest=$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Update image tag
         run: |
           node .deploy-workflow/src/update-tag.js \
             --app-path "${{ inputs.app-path }}" \
             --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \
-            --repo "${{ github.repository }}"
+            --repo "${{ github.repository }}" \
+            --digest "${{ steps.digest.outputs.digest }}"
 
       - name: Commit and push
         run: |
