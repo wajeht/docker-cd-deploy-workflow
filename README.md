@@ -19,7 +19,7 @@ App repo builds image to ghcr.io
 ```yaml
 jobs:
   deploy:
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.22
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.23
     with:
       app-path: apps/your-app
       service-name: your-app
