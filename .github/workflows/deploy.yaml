@@ -39,13 +39,13 @@ jobs:
       url: ${{ inputs.url || format('https://{0}.jaw.dev', github.event.repository.name) }}
     steps:
       - name: Checkout home-ops
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ inputs.home-ops-repo }}
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Checkout deploy workflow scripts
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: wajeht/docker-cd-deploy-workflow
           token: ${{ secrets.GH_TOKEN }}
