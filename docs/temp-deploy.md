@@ -94,6 +94,8 @@ jobs:
       app-path: apps/your-app
       service-name: your-app
       tag: ${{ needs.temp-build.outputs.tag }}
+      # Optional: protect the temp PR site with Traefik auth.
+      # auth-middleware: oauth2-admin@file
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
@@ -118,6 +120,7 @@ jobs:
 - service set: keeps `service-name` plus recursive `depends_on` services
 - image tag: updates only `ghcr.io/<owner>/*` images
 - Traefik labels: rewrites router/service names and hostname
+- optional auth: replaces/adds router middleware labels when `auth-middleware` is set
 - volumes: converts bind mounts to named Docker volumes
 - networks/volumes: removes unused top-level declarations
 - `container_name`: strips names to avoid conflicts
@@ -146,6 +149,20 @@ git commit -m "add temp deploy env overrides"
 The workflow copies `.env.sops` into the temp stack as `.env.sops.override`.
 docker-cd merges it over the home-ops base `.env.sops`.
 
+## Optional Auth
+
+Set `auth-middleware` to protect a temp PR site with an existing Traefik middleware:
+
+```yaml
+with:
+  app-path: apps/bang
+  service-name: bang
+  tag: ${{ needs.temp-build.outputs.tag }}
+  auth-middleware: oauth2-admin@file
+```
+
+If omitted, temp deploys keep the production middleware labels.
+
 ## Inputs
 
 ### Temp Deploy
@@ -156,6 +173,7 @@ docker-cd merges it over the home-ops base `.env.sops`.
 | `app-path` | Yes | - | Base app path, like `apps/bang` |
 | `service-name` | Yes | - | Compose service to deploy, like `bang` |
 | `tag` | Yes | - | Image tag |
+| `auth-middleware` | No | empty | Optional Traefik middleware for temp routers, like `oauth2-admin@file` |
 
 ### Temp Cleanup
 

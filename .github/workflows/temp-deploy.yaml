@@ -20,6 +20,10 @@ on:
         type: string
         required: true
         description: "Image tag (e.g., abc1234)"
+      auth-middleware:
+        type: string
+        default: ""
+        description: "Optional Traefik middleware for temp routers (e.g., oauth2-admin@file)"
     secrets:
       GH_TOKEN:
         required: true
@@ -87,6 +91,7 @@ jobs:
             --tag "${{ inputs.tag }}" \
             --pr-number "${{ github.event.pull_request.number }}" \
             --repo-owner "${{ github.repository_owner }}" \
+            --auth-middleware "${{ inputs.auth-middleware }}" \
             --app-repo-path .app-repo
 
       - name: Commit and push
