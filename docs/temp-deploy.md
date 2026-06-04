@@ -4,6 +4,12 @@ Temporary PR-based environments. Each PR gets its own live instance.
 
 ```
 Add temp-deploy label to PR
+    -> normal temp app, keeping production middleware labels
+
+Add temp-deploy-with-auth label to PR
+    -> auth-protected temp app
+
+For either temp label
     -> build image from PR branch
     -> copy apps/<app>/ to apps/<app>-pr-<N>/ in home-ops
     -> rewrite compose for the PR stack
@@ -15,7 +21,7 @@ Push new commits while label is present
     -> update temp stack
     -> docker-cd redeploys
 
-Close PR or remove label
+Close PR or remove the last temp deploy label
     -> remove apps/<app>-pr-<N>/ from home-ops
     -> clean up GitHub Deployment
     -> docker-cd garbage collects the stack
@@ -26,15 +32,16 @@ Close PR or remove label
 1. Wildcard DNS for `*.jaw.dev`
 2. Wildcard TLS cert in Traefik for `*.jaw.dev`
 3. `GH_TOKEN` secret with `repo` and `packages` scope
-4. `temp-deploy` label:
+4. `temp-deploy` and `temp-deploy-with-auth` labels:
 
 ```bash
 gh label create temp-deploy
+gh label create temp-deploy-with-auth
 ```
 
 ## Setup
 
-Add `pull_request` types to CI and append temp jobs:
+Add `pull_request` types to CI and append temp build/deploy jobs:
 
 ```yaml
 name: CI
@@ -43,14 +50,18 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, closed]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 jobs:
   temp-build:
     name: Temp Build
     if: >
-      (github.event.action == 'labeled' && github.event.label.name == 'temp-deploy') ||
-      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'temp-deploy'))
+      (github.event.action == 'labeled' &&
+        (github.event.label.name == 'temp-deploy' ||
+         github.event.label.name == 'temp-deploy-with-auth')) ||
+      (github.event.action != 'labeled' &&
+        (contains(github.event.pull_request.labels.*.name, 'temp-deploy') ||
+         contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth')))
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.image-name.outputs.TAG }}
@@ -84,29 +95,57 @@ jobs:
   temp-deploy:
     name: Temp Deploy
     if: >
-      (github.event.action == 'labeled' && github.event.label.name == 'temp-deploy') ||
-      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'temp-deploy'))
+      (github.event.action == 'labeled' &&
+        (github.event.label.name == 'temp-deploy' ||
+         github.event.label.name == 'temp-deploy-with-auth')) ||
+      (github.event.action != 'labeled' &&
+        (contains(github.event.pull_request.labels.*.name, 'temp-deploy') ||
+         contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth')))
     needs: temp-build
     permissions:
       deployments: write
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.23
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.25
     with:
       app-path: apps/your-app
       service-name: your-app
       tag: ${{ needs.temp-build.outputs.tag }}
-      # Optional: protect the temp PR site with Traefik auth.
-      # auth-middleware: oauth2-admin@file
+      auth-middleware: ${{ contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth') && 'oauth2-admin@file' || '' }}
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
+```
 
+Put cleanup in its own workflow so CI deploy jobs cannot cancel it.
+
+`.github/workflows/temp-cleanup.yml`:
+
+```yaml
+name: Temp Cleanup
+
+on:
+  pull_request:
+    types: [closed, unlabeled]
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: temp-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
   temp-cleanup:
     name: Temp Cleanup
     if: >
       github.event.action == 'closed' ||
-      (github.event.action == 'unlabeled' && github.event.label.name == 'temp-deploy')
+      (github.event.action == 'unlabeled' &&
+        (github.event.label.name == 'temp-deploy' ||
+         github.event.label.name == 'temp-deploy-with-auth') &&
+        !contains(github.event.pull_request.labels.*.name, 'temp-deploy') &&
+        !contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth'))
     permissions:
       deployments: write
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@v0.0.23
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@v0.0.25
     with:
       app-path: apps/your-app
     secrets:
@@ -162,6 +201,20 @@ with:
 ```
 
 If omitted, temp deploys keep the production middleware labels.
+
+For per-PR auth, gate the input from labels:
+
+```yaml
+auth-middleware: ${{ contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth') && 'oauth2-admin@file' || '' }}
+```
+
+Recommended label behavior:
+
+- `temp-deploy`: deploy a temp app with the production middleware labels
+- `temp-deploy-with-auth`: deploy the same temp app with `oauth2-admin@file`
+- if both labels are present, auth wins because the auth label sets `auth-middleware`
+- removing one temp label redeploys with the remaining mode
+- removing the last temp label runs cleanup
 
 ## Inputs
 

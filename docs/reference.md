@@ -6,7 +6,7 @@
 |----------|---------|-------------|
 | `ci.yml` | Push, PR, tag `v*` | Runs tests; on tag, generates a changelog and creates a GitHub Release |
 | `deploy.yaml` | Push to main | Updates the digest-pinned image tag in home-ops and creates a GitHub Deployment |
-| `temp-deploy.yaml` | PR labeled `temp-deploy` or new commits | Creates a temporary PR environment; `auth-middleware` can protect temp routers |
+| `temp-deploy.yaml` | App repo PR workflow | Creates a temporary PR environment; `auth-middleware` can protect temp routers |
 | `temp-cleanup.yaml` | PR closed or label removed | Removes a temporary PR environment |
 
 ## Scripts
