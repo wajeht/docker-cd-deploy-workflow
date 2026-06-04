@@ -142,11 +142,23 @@ function applyAuthMiddleware(labels, authMiddleware) {
 	return rewritten;
 }
 
+function tempTraefikName(name, serviceName, prNumber) {
+	const tempName = `${serviceName}-pr-${prNumber}`;
+	if (name === serviceName) return tempName;
+	if (name.startsWith(`${serviceName}-`)) return `${tempName}${name.slice(serviceName.length)}`;
+	return `${name}-pr-${prNumber}`;
+}
+
+function rewriteTraefikLabel(label, serviceName, prNumber) {
+	return label
+		.replace(/^traefik\.http\.routers\.([^.]+)\./, (_, name) => `traefik.http.routers.${tempTraefikName(name, serviceName, prNumber)}.`)
+		.replace(/^traefik\.http\.services\.([^.]+)\./, (_, name) => `traefik.http.services.${tempTraefikName(name, serviceName, prNumber)}.`);
+}
+
 export function rewriteComposeForTempDeploy(doc, options) {
 	const { appName, serviceName, tag, prNumber, repoOwner, authMiddleware } = options;
 	const rewritten = structuredClone(doc);
 	const messages = [];
-	const tempName = `${serviceName}-pr-${prNumber}`;
 
 	const selectedServices = dependentServices(rewritten.services, serviceName);
 	if (selectedServices.size === 0) {
@@ -183,10 +195,7 @@ export function rewriteComposeForTempDeploy(doc, options) {
 			const labels = service.labels
 				.filter((label) => !label.includes('redirect'))
 				.map((label) =>
-					label
-						.replaceAll(`traefik.http.routers.${serviceName}`, `traefik.http.routers.${tempName}`)
-						.replaceAll(`traefik.http.services.${serviceName}`, `traefik.http.services.${tempName}`)
-						.replace(/Host\(`[^`]+`\)/g, `Host(\`${hostname}\`)`),
+					rewriteTraefikLabel(label, serviceName, prNumber).replace(/Host\(`[^`]+`\)/g, `Host(\`${hostname}\`)`),
 				);
 			service.labels = applyAuthMiddleware(labels, authMiddleware);
 		}

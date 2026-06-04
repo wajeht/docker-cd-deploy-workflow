@@ -231,6 +231,39 @@ describe('temp-compose', () => {
 		]);
 	});
 
+	it('rewrites router names that differ from service-name', () => {
+		const result = rewriteComposeForTempDeploy(
+			{
+				services: {
+					www: {
+						image: 'ghcr.io/wajeht/jaw.dev:old',
+						labels: [
+							'traefik.http.routers.jaw-dev.rule=Host(`jaw.dev`) || Host(`www.jaw.dev`)',
+							'traefik.http.routers.jaw-dev.entrypoints=websecure',
+							'traefik.http.routers.jaw-dev.middlewares=rate-limit-global@file',
+							'traefik.http.services.jaw-dev.loadbalancer.server.port=80',
+						],
+					},
+				},
+			},
+			{
+				appName: 'jaw-dev',
+				serviceName: 'www',
+				tag: 'abc1234',
+				prNumber: '38',
+				repoOwner: 'wajeht',
+				authMiddleware: 'oauth2-admin@file',
+			},
+		);
+
+		assert.deepStrictEqual(result.doc.services.www.labels, [
+			'traefik.http.routers.jaw-dev-pr-38.rule=Host(`pr-38-jaw-dev.jaw.dev`) || Host(`pr-38-jaw-dev.jaw.dev`)',
+			'traefik.http.routers.jaw-dev-pr-38.entrypoints=websecure',
+			'traefik.http.routers.jaw-dev-pr-38.middlewares=oauth2-admin@file',
+			'traefik.http.services.jaw-dev-pr-38.loadbalancer.server.port=80',
+		]);
+	});
+
 	it('replaces existing router middlewares when auth-middleware is set', () => {
 		const result = rewriteComposeForTempDeploy(
 			{
