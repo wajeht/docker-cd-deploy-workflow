@@ -11,7 +11,7 @@ App repo builds image to ghcr.io
 ## Workflows
 
 - `deploy.yaml` updates a production image tag in home-ops, pinned to the image digest.
-- `temp-deploy.yaml` creates temporary PR environments.
+- `temp-deploy.yaml` creates temporary PR environments, with optional Traefik auth.
 - `temp-cleanup.yaml` removes temporary PR environments.
 
 ## Use
