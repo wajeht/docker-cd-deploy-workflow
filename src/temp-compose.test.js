@@ -199,6 +199,167 @@ describe('temp-compose', () => {
 		assert.strictEqual(result.url, 'https://pr-42-example.jaw.dev');
 	});
 
+	it('preserves existing middlewares by default', () => {
+		const result = rewriteComposeForTempDeploy(
+			{
+				services: {
+					bang: {
+						image: 'ghcr.io/wajeht/bang:old',
+						labels: [
+							'traefik.http.routers.bang.rule=Host(`bang.jaw.dev`)',
+							'traefik.http.routers.bang.entrypoints=websecure',
+							'traefik.http.routers.bang.middlewares=rate-limit-global@file',
+							'traefik.http.services.bang.loadbalancer.server.port=80',
+						],
+					},
+				},
+			},
+			{
+				appName: 'bang',
+				serviceName: 'bang',
+				tag: 'abc1234',
+				prNumber: '42',
+				repoOwner: 'wajeht',
+			},
+		);
+
+		assert.deepStrictEqual(result.doc.services.bang.labels, [
+			'traefik.http.routers.bang-pr-42.rule=Host(`pr-42-bang.jaw.dev`)',
+			'traefik.http.routers.bang-pr-42.entrypoints=websecure',
+			'traefik.http.routers.bang-pr-42.middlewares=rate-limit-global@file',
+			'traefik.http.services.bang-pr-42.loadbalancer.server.port=80',
+		]);
+	});
+
+	it('replaces existing router middlewares when auth-middleware is set', () => {
+		const result = rewriteComposeForTempDeploy(
+			{
+				services: {
+					bang: {
+						image: 'ghcr.io/wajeht/bang:old',
+						labels: [
+							'traefik.http.routers.bang.rule=Host(`bang.jaw.dev`)',
+							'traefik.http.routers.bang.entrypoints=websecure',
+							'traefik.http.routers.bang.middlewares=rate-limit-global@file',
+							'traefik.http.services.bang.loadbalancer.server.port=80',
+						],
+					},
+				},
+			},
+			{
+				appName: 'bang',
+				serviceName: 'bang',
+				tag: 'abc1234',
+				prNumber: '42',
+				repoOwner: 'wajeht',
+				authMiddleware: 'oauth2-admin@file',
+			},
+		);
+
+		assert.deepStrictEqual(result.doc.services.bang.labels, [
+			'traefik.http.routers.bang-pr-42.rule=Host(`pr-42-bang.jaw.dev`)',
+			'traefik.http.routers.bang-pr-42.entrypoints=websecure',
+			'traefik.http.routers.bang-pr-42.middlewares=oauth2-admin@file',
+			'traefik.http.services.bang-pr-42.loadbalancer.server.port=80',
+		]);
+	});
+
+	it('adds router middlewares when auth-middleware is set and no middleware label exists', () => {
+		const result = rewriteComposeForTempDeploy(
+			{
+				services: {
+					demo: {
+						image: 'ghcr.io/wajeht/demo:old',
+						labels: [
+							'traefik.http.routers.demo.rule=Host(`demo.jaw.dev`)',
+							'traefik.http.routers.demo.entrypoints=websecure',
+							'traefik.http.services.demo.loadbalancer.server.port=3000',
+						],
+					},
+				},
+			},
+			{
+				appName: 'demo',
+				serviceName: 'demo',
+				tag: 'abc1234',
+				prNumber: '42',
+				repoOwner: 'wajeht',
+				authMiddleware: 'oauth2-admin@file',
+			},
+		);
+
+		assert.deepStrictEqual(result.doc.services.demo.labels, [
+			'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)',
+			'traefik.http.routers.demo-pr-42.entrypoints=websecure',
+			'traefik.http.services.demo-pr-42.loadbalancer.server.port=3000',
+			'traefik.http.routers.demo-pr-42.middlewares=oauth2-admin@file',
+		]);
+	});
+
+	it('applies auth-middleware to each rewritten router on the service', () => {
+		const result = rewriteComposeForTempDeploy(
+			{
+				services: {
+					homeassistant: {
+						image: 'ghcr.io/wajeht/homeassistant:old',
+						labels: [
+							'traefik.http.routers.homeassistant.rule=Host(`ha.jaw.dev`)',
+							'traefik.http.routers.homeassistant.middlewares=oauth2-admin@file',
+							'traefik.http.routers.homeassistant-app.rule=Host(`ha-app.jaw.dev`)',
+							'traefik.http.routers.homeassistant-app.middlewares=rate-limit-global@file',
+							'traefik.http.services.homeassistant.loadbalancer.server.port=8123',
+						],
+					},
+				},
+			},
+			{
+				appName: 'homeassistant',
+				serviceName: 'homeassistant',
+				tag: 'abc1234',
+				prNumber: '42',
+				repoOwner: 'wajeht',
+				authMiddleware: 'oauth2-admin@file',
+			},
+		);
+
+		assert.deepStrictEqual(result.doc.services.homeassistant.labels, [
+			'traefik.http.routers.homeassistant-pr-42.rule=Host(`pr-42-homeassistant.jaw.dev`)',
+			'traefik.http.routers.homeassistant-pr-42.middlewares=oauth2-admin@file',
+			'traefik.http.routers.homeassistant-pr-42-app.rule=Host(`pr-42-homeassistant.jaw.dev`)',
+			'traefik.http.routers.homeassistant-pr-42-app.middlewares=oauth2-admin@file',
+			'traefik.http.services.homeassistant-pr-42.loadbalancer.server.port=8123',
+		]);
+	});
+
+	it('ignores blank auth-middleware values', () => {
+		const result = rewriteComposeForTempDeploy(
+			{
+				services: {
+					bang: {
+						image: 'ghcr.io/wajeht/bang:old',
+						labels: [
+							'traefik.http.routers.bang.rule=Host(`bang.jaw.dev`)',
+							'traefik.http.routers.bang.middlewares=rate-limit-global@file',
+						],
+					},
+				},
+			},
+			{
+				appName: 'bang',
+				serviceName: 'bang',
+				tag: 'abc1234',
+				prNumber: '42',
+				repoOwner: 'wajeht',
+				authMiddleware: '   ',
+			},
+		);
+
+		assert.deepStrictEqual(result.doc.services.bang.labels, [
+			'traefik.http.routers.bang-pr-42.rule=Host(`pr-42-bang.jaw.dev`)',
+			'traefik.http.routers.bang-pr-42.middlewares=rate-limit-global@file',
+		]);
+	});
+
 	it('fails when service-name is not present', () => {
 		assert.throws(
 			() =>
@@ -284,6 +445,57 @@ describe('temp-compose', () => {
 			assert.deepStrictEqual(Object.keys(rewritten.networks).sort(), ['internal', 'traefik']);
 			assert.deepStrictEqual(Object.keys(rewritten.volumes), ['db']);
 			assert.strictEqual(rewritten.services.demo.labels[1], 'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)');
+		} finally {
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it('passes auth-middleware through the CLI', () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'));
+		const appPath = path.join(tempDir, 'apps', 'demo');
+		const tempPath = `${appPath}-pr-42`;
+
+		try {
+			fs.mkdirSync(appPath, { recursive: true });
+			fs.writeFileSync(
+				path.join(appPath, 'docker-compose.yml'),
+				yaml.dump({
+					services: {
+						demo: {
+							image: 'ghcr.io/wajeht/demo:old',
+							labels: [
+								'traefik.http.routers.demo.rule=Host(`demo.jaw.dev`)',
+								'traefik.http.routers.demo.middlewares=rate-limit-global@file',
+								'traefik.http.services.demo.loadbalancer.server.port=3000',
+							],
+						},
+					},
+				}),
+			);
+
+			execFileSync('node', [
+				scriptPath,
+				'--app-path',
+				appPath,
+				'--service-name',
+				'demo',
+				'--tag',
+				'abc1234',
+				'--pr-number',
+				'42',
+				'--repo-owner',
+				'wajeht',
+				'--auth-middleware',
+				'oauth2-admin@file',
+			]);
+
+			const rewritten = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'));
+
+			assert.deepStrictEqual(rewritten.services.demo.labels, [
+				'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)',
+				'traefik.http.routers.demo-pr-42.middlewares=oauth2-admin@file',
+				'traefik.http.services.demo-pr-42.loadbalancer.server.port=3000',
+			]);
 		} finally {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
