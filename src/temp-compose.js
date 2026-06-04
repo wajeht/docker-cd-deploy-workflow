@@ -113,8 +113,37 @@ function pruneVolumes(doc, volumeNames, messages) {
 	}
 }
 
+function applyAuthMiddleware(labels, authMiddleware) {
+	const middleware = authMiddleware?.trim();
+	if (!middleware) return labels;
+
+	const routerNames = new Set();
+	const routersWithMiddleware = new Set();
+
+	const rewritten = labels.map((label) => {
+		const router = label.match(/^traefik\.http\.routers\.([^.]+)\./)?.[1];
+		if (!router) return label;
+
+		routerNames.add(router);
+		if (!label.startsWith(`traefik.http.routers.${router}.middlewares=`)) {
+			return label;
+		}
+
+		routersWithMiddleware.add(router);
+		return `traefik.http.routers.${router}.middlewares=${middleware}`;
+	});
+
+	for (const router of routerNames) {
+		if (!routersWithMiddleware.has(router)) {
+			rewritten.push(`traefik.http.routers.${router}.middlewares=${middleware}`);
+		}
+	}
+
+	return rewritten;
+}
+
 export function rewriteComposeForTempDeploy(doc, options) {
-	const { appName, serviceName, tag, prNumber, repoOwner } = options;
+	const { appName, serviceName, tag, prNumber, repoOwner, authMiddleware } = options;
 	const rewritten = structuredClone(doc);
 	const messages = [];
 	const tempName = `${serviceName}-pr-${prNumber}`;
@@ -151,7 +180,7 @@ export function rewriteComposeForTempDeploy(doc, options) {
 		}
 
 		if (service.labels) {
-			service.labels = service.labels
+			const labels = service.labels
 				.filter((label) => !label.includes('redirect'))
 				.map((label) =>
 					label
@@ -159,6 +188,7 @@ export function rewriteComposeForTempDeploy(doc, options) {
 						.replaceAll(`traefik.http.services.${serviceName}`, `traefik.http.services.${tempName}`)
 						.replace(/Host\(`[^`]+`\)/g, `Host(\`${hostname}\`)`),
 				);
+			service.labels = applyAuthMiddleware(labels, authMiddleware);
 		}
 
 		if (service.volumes) {
@@ -209,6 +239,7 @@ export async function main(argv = process.argv.slice(2)) {
 			'pr-number': { type: 'string' },
 			'repo-owner': { type: 'string' },
 			'app-repo-path': { type: 'string' },
+			'auth-middleware': { type: 'string' },
 		},
 	});
 	for (const key of ['app-path', 'service-name', 'tag', 'pr-number', 'repo-owner']) {
@@ -220,6 +251,7 @@ export async function main(argv = process.argv.slice(2)) {
 	const tag = args['tag'];
 	const prNumber = args['pr-number'];
 	const repoOwner = args['repo-owner'];
+	const authMiddleware = args['auth-middleware'];
 	const appName = path.basename(appPath);
 	const tempPath = `${appPath}-pr-${prNumber}`;
 
@@ -236,7 +268,7 @@ export async function main(argv = process.argv.slice(2)) {
 
 	const composePath = path.join(tempPath, 'docker-compose.yml');
 	const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
-	const result = rewriteComposeForTempDeploy(doc, { appName, serviceName, tag, prNumber, repoOwner });
+	const result = rewriteComposeForTempDeploy(doc, { appName, serviceName, tag, prNumber, repoOwner, authMiddleware });
 	for (const message of result.messages) {
 		console.log(message);
 	}
