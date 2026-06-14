@@ -420,6 +420,9 @@ describe('temp-compose', () => {
 			fs.writeFileSync(
 				path.join(appPath, 'docker-compose.yml'),
 				yaml.dump({
+					'x-docker-cd': {
+						rolling_update: true,
+					},
 					services: {
 						demo: {
 							image: 'ghcr.io/wajeht/demo:old',
@@ -472,12 +475,14 @@ describe('temp-compose', () => {
 
 			const rewritten = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'));
 
+			assert.deepStrictEqual(rewritten['x-docker-cd'], { rolling_update: false });
 			assert.deepStrictEqual(Object.keys(rewritten.services).sort(), ['demo', 'demo-db']);
 			assert.strictEqual(rewritten.services.demo.image, 'ghcr.io/wajeht/demo:abc1234');
 			assert.strictEqual(rewritten.services['demo-db'].container_name, undefined);
 			assert.deepStrictEqual(Object.keys(rewritten.networks).sort(), ['internal', 'traefik']);
 			assert.deepStrictEqual(Object.keys(rewritten.volumes), ['db']);
 			assert.strictEqual(rewritten.services.demo.labels[1], 'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)');
+			assert.strictEqual(fs.existsSync(path.join(tempPath, 'docker-cd.yml')), false);
 		} finally {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}

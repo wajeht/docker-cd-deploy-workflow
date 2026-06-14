@@ -163,7 +163,7 @@ jobs:
 - volumes: converts bind mounts to named Docker volumes
 - networks/volumes: removes unused top-level declarations
 - `container_name`: strips names to avoid conflicts
-- `docker-cd.yml`: forces `rolling_update: false`
+- `x-docker-cd.rolling_update`: forces `false`
 - env overrides: copies PR branch `.env.sops` as `.env.sops.override`
 
 Everything else on kept services is preserved. If a temp deploy needs a database, Redis, or another local service, declare it in `depends_on`.

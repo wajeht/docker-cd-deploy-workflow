@@ -282,8 +282,16 @@ export async function main(argv = process.argv.slice(2)) {
 		console.log(message);
 	}
 
-	fs.writeFileSync(composePath, yaml.dump(result.doc, { lineWidth: -1, quotingType: '"', forceQuotes: false }));
-	fs.writeFileSync(path.join(tempPath, 'docker-cd.yml'), 'rolling_update: false\n');
+	const composeDoc = { ...result.doc };
+	delete composeDoc['x-docker-cd'];
+	const tempComposeDoc = {
+		'x-docker-cd': {
+			rolling_update: false,
+		},
+		...composeDoc,
+	};
+
+	fs.writeFileSync(composePath, yaml.dump(tempComposeDoc, { lineWidth: -1, quotingType: '"', forceQuotes: false }));
 
 	console.log(`Created temp stack at ${tempPath}`);
 	console.log(`URL: ${result.url}`);
