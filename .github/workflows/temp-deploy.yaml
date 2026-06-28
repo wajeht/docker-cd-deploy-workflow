@@ -42,20 +42,20 @@ jobs:
       url: ${{ steps.rewrite.outputs.url }}
     steps:
       - name: Checkout home-ops
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: ${{ inputs.home-ops-repo }}
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Checkout deploy workflow scripts
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: wajeht/docker-cd-deploy-workflow
           token: ${{ secrets.GH_TOKEN }}
           path: .deploy-workflow
 
       - name: Checkout app repo for env overrides
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.event.pull_request.head.ref }}
