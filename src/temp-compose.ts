@@ -4,8 +4,70 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import yaml from 'js-yaml';
 
-export function collectHosts(services) {
-	const allHosts = [];
+type ComposeVolumeObject = Record<string, unknown> & {
+	type?: unknown;
+	source?: unknown;
+};
+
+type ComposeVolume = string | ComposeVolumeObject | null;
+
+export type ComposeService = Record<string, unknown> & {
+	labels?: string[];
+	depends_on?: string[] | Record<string, unknown>;
+	networks?: string[] | Record<string, unknown>;
+	container_name?: unknown;
+	image?: string;
+	volumes?: ComposeVolume[];
+};
+
+export type ComposeDocument = Record<string, unknown> & {
+	services: Record<string, ComposeService>;
+	networks?: Record<string, unknown>;
+	volumes?: Record<string, unknown>;
+};
+
+type RewriteTempDeployOptions = {
+	appName: string;
+	serviceName: string;
+	tag: string;
+	prNumber: string;
+	repoOwner: string;
+	authMiddleware?: string;
+};
+
+type RewriteTempDeployResult = {
+	doc: ComposeDocument;
+	hostname: string;
+	url: string;
+	messages: string[];
+};
+
+type TempComposeArgs = {
+	'app-path'?: string;
+	'service-name'?: string;
+	tag?: string;
+	'pr-number'?: string;
+	'repo-owner'?: string;
+	'app-repo-path'?: string;
+	'auth-middleware'?: string;
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isComposeDocument(value: unknown): value is ComposeDocument {
+	return isObject(value) && isObject(value.services);
+}
+
+function requireArg(args: TempComposeArgs, key: keyof TempComposeArgs): string {
+	const value = args[key];
+	if (!value) throw new Error(`Missing required arg: --${key}`);
+	return value;
+}
+
+export function collectHosts(services: Record<string, ComposeService>): string[] {
+	const allHosts: string[] = [];
 	for (const [, service] of Object.entries(services)) {
 		if (!service.labels) continue;
 		for (const label of service.labels) {
@@ -17,12 +79,12 @@ export function collectHosts(services) {
 	return allHosts;
 }
 
-export function detectHost(services) {
+export function detectHost(services: Record<string, ComposeService>): string | null {
 	const allHosts = collectHosts(services);
 	return allHosts.find((h) => h.split('.').length >= 3 && !h.startsWith('www.')) || allHosts.find((h) => h.split('.').length >= 3) || allHosts[0] || null;
 }
 
-export function dependsOnServices(service) {
+export function dependsOnServices(service?: ComposeService): string[] {
 	const dependsOn = service?.depends_on;
 	if (Array.isArray(dependsOn)) {
 		return dependsOn.filter((name) => typeof name === 'string');
@@ -33,7 +95,7 @@ export function dependsOnServices(service) {
 	return [];
 }
 
-export function dependentServices(services, rootService) {
+export function dependentServices(services: Record<string, ComposeService> | undefined, rootService: string): Set<string> {
 	if (!services || !Object.hasOwn(services, rootService)) {
 		return new Set();
 	}
@@ -43,6 +105,7 @@ export function dependentServices(services, rootService) {
 
 	while (pending.length > 0) {
 		const serviceName = pending.pop();
+		if (!serviceName) continue;
 		for (const dependency of dependsOnServices(services[serviceName])) {
 			if (!Object.hasOwn(services, dependency) || selected.has(dependency)) {
 				continue;
@@ -55,7 +118,7 @@ export function dependentServices(services, rootService) {
 	return selected;
 }
 
-function serviceNetworkNames(service) {
+function serviceNetworkNames(service: ComposeService): string[] {
 	if (Array.isArray(service.networks)) {
 		return service.networks.filter((name) => typeof name === 'string');
 	}
@@ -65,7 +128,7 @@ function serviceNetworkNames(service) {
 	return [];
 }
 
-function namedVolumeFromString(volume) {
+function namedVolumeFromString(volume: string): string | null {
 	const [source] = volume.split(':');
 	if (!source || path.isAbsolute(source) || source.startsWith('.')) {
 		return null;
@@ -76,7 +139,7 @@ function namedVolumeFromString(volume) {
 	return source;
 }
 
-function pruneNetworks(doc, messages) {
+function pruneNetworks(doc: ComposeDocument, messages: string[]): void {
 	if (!doc.networks) return;
 
 	const usedNetworks = new Set();
@@ -98,7 +161,7 @@ function pruneNetworks(doc, messages) {
 	}
 }
 
-function pruneVolumes(doc, volumeNames, messages) {
+function pruneVolumes(doc: ComposeDocument, volumeNames: Set<string>, messages: string[]): void {
 	if (!doc.volumes) return;
 
 	for (const volumeName of Object.keys(doc.volumes)) {
@@ -113,7 +176,7 @@ function pruneVolumes(doc, volumeNames, messages) {
 	}
 }
 
-function applyAuthMiddleware(labels, authMiddleware) {
+function applyAuthMiddleware(labels: string[], authMiddleware?: string): string[] {
 	const middleware = authMiddleware?.trim();
 	if (!middleware) return labels;
 
@@ -142,20 +205,20 @@ function applyAuthMiddleware(labels, authMiddleware) {
 	return rewritten;
 }
 
-function tempTraefikName(name, serviceName, prNumber) {
+function tempTraefikName(name: string, serviceName: string, prNumber: string): string {
 	const tempName = `${serviceName}-pr-${prNumber}`;
 	if (name === serviceName) return tempName;
 	if (name.startsWith(`${serviceName}-`)) return `${tempName}${name.slice(serviceName.length)}`;
 	return `${name}-pr-${prNumber}`;
 }
 
-function rewriteTraefikLabel(label, serviceName, prNumber) {
+function rewriteTraefikLabel(label: string, serviceName: string, prNumber: string): string {
 	return label
-		.replace(/^traefik\.http\.routers\.([^.]+)\./, (_, name) => `traefik.http.routers.${tempTraefikName(name, serviceName, prNumber)}.`)
-		.replace(/^traefik\.http\.services\.([^.]+)\./, (_, name) => `traefik.http.services.${tempTraefikName(name, serviceName, prNumber)}.`);
+		.replace(/^traefik\.http\.routers\.([^.]+)\./, (_match, name: string) => `traefik.http.routers.${tempTraefikName(name, serviceName, prNumber)}.`)
+		.replace(/^traefik\.http\.services\.([^.]+)\./, (_match, name: string) => `traefik.http.services.${tempTraefikName(name, serviceName, prNumber)}.`);
 }
 
-export function rewriteComposeForTempDeploy(doc, options) {
+export function rewriteComposeForTempDeploy(doc: ComposeDocument, options: RewriteTempDeployOptions): RewriteTempDeployResult {
 	const { appName, serviceName, tag, prNumber, repoOwner, authMiddleware } = options;
 	const rewritten = structuredClone(doc);
 	const messages = [];
@@ -179,7 +242,7 @@ export function rewriteComposeForTempDeploy(doc, options) {
 
 	const domain = originalHost.split('.').slice(1).join('.');
 	const hostname = `pr-${prNumber}-${appName}.${domain}`;
-	const volumeNames = new Set();
+	const volumeNames = new Set<string>();
 
 	for (const service of Object.values(rewritten.services)) {
 		if (service.container_name) {
@@ -238,8 +301,8 @@ export function rewriteComposeForTempDeploy(doc, options) {
 	return { doc: rewritten, hostname, url: `https://${hostname}`, messages };
 }
 
-export async function main(argv = process.argv.slice(2)) {
-	const { values: args } = parseArgs({
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+	const { values } = parseArgs({
 		args: argv,
 		options: {
 			'app-path': { type: 'string' },
@@ -251,15 +314,13 @@ export async function main(argv = process.argv.slice(2)) {
 			'auth-middleware': { type: 'string' },
 		},
 	});
-	for (const key of ['app-path', 'service-name', 'tag', 'pr-number', 'repo-owner']) {
-		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
-	}
+	const args = values as TempComposeArgs;
 	const appRepoPath = args['app-repo-path'];
-	const appPath = args['app-path'];
-	const serviceName = args['service-name'];
-	const tag = args['tag'];
-	const prNumber = args['pr-number'];
-	const repoOwner = args['repo-owner'];
+	const appPath = requireArg(args, 'app-path');
+	const serviceName = requireArg(args, 'service-name');
+	const tag = requireArg(args, 'tag');
+	const prNumber = requireArg(args, 'pr-number');
+	const repoOwner = requireArg(args, 'repo-owner');
 	const authMiddleware = args['auth-middleware'];
 	const appName = path.basename(appPath);
 	const tempPath = `${appPath}-pr-${prNumber}`;
@@ -277,6 +338,9 @@ export async function main(argv = process.argv.slice(2)) {
 
 	const composePath = path.join(tempPath, 'docker-compose.yml');
 	const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
+	if (!isComposeDocument(doc)) {
+		throw new Error('docker-compose.yml must contain a services block');
+	}
 	const result = rewriteComposeForTempDeploy(doc, { appName, serviceName, tag, prNumber, repoOwner, authMiddleware });
 	for (const message of result.messages) {
 		console.log(message);

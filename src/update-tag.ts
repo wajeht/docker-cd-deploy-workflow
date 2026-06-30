@@ -4,22 +4,65 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import yaml from 'js-yaml';
 
-function isObject(value) {
+type ComposeService = {
+	image?: unknown;
+};
+
+type ComposeDocument = {
+	services?: Record<string, ComposeService>;
+};
+
+type UpdateComposeImageTagOptions = {
+	serviceName: string;
+	repo: string;
+	tag: string;
+	digest: string;
+};
+
+type UpdateComposeImageTagResult =
+	| {
+			changed: true;
+			content: string;
+			image: string;
+			previousImage: string;
+	  }
+	| {
+			changed: false;
+			content: string;
+			image: string;
+			reason: string;
+	  };
+
+type UpdateTagArgs = {
+	'app-path'?: string;
+	'service-name'?: string;
+	tag?: string;
+	repo?: string;
+	digest?: string;
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function escapeRegExp(value) {
+function requireArg(args: UpdateTagArgs, key: keyof UpdateTagArgs): string {
+	const value = args[key];
+	if (!value) throw new Error(`Missing required arg: --${key}`);
+	return value;
+}
+
+function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function imageRepository(image) {
+export function imageRepository(image: string): string {
 	const withoutDigest = image.split('@')[0];
 	const lastSlash = withoutDigest.lastIndexOf('/');
 	const tagIndex = withoutDigest.indexOf(':', lastSlash + 1);
 	return tagIndex === -1 ? withoutDigest : withoutDigest.slice(0, tagIndex);
 }
 
-function replaceServiceImageLine(content, serviceName, image) {
+function replaceServiceImageLine(content: string, serviceName: string, image: string): string {
 	const lines = content.split('\n');
 	const servicesLine = lines.findIndex((line) => /^(\s*)services:\s*(?:#.*)?$/.test(line));
 	if (servicesLine === -1) {
@@ -63,8 +106,11 @@ function replaceServiceImageLine(content, serviceName, image) {
 	throw new Error(`Service "${serviceName}" must define an image`);
 }
 
-export function updateComposeImageTag(content, { serviceName, repo, tag, digest }) {
-	const doc = yaml.load(content);
+export function updateComposeImageTag(
+	content: string,
+	{ serviceName, repo, tag, digest }: UpdateComposeImageTagOptions,
+): UpdateComposeImageTagResult {
+	const doc = yaml.load(content) as ComposeDocument;
 	if (!isObject(doc) || !isObject(doc.services)) {
 		throw new Error('docker-compose.yml must contain a services block');
 	}
@@ -101,8 +147,8 @@ export function updateComposeImageTag(content, { serviceName, repo, tag, digest 
 	};
 }
 
-export async function main(argv = process.argv.slice(2)) {
-	const { values: args } = parseArgs({
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+	const { values } = parseArgs({
 		args: argv,
 		options: {
 			'app-path': { type: 'string' },
@@ -112,10 +158,12 @@ export async function main(argv = process.argv.slice(2)) {
 			digest: { type: 'string' },
 		},
 	});
-	for (const key of ['app-path', 'service-name', 'tag', 'repo', 'digest']) {
-		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
-	}
-	const { 'app-path': appPath, 'service-name': serviceName, tag, repo, digest } = args;
+	const args = values as UpdateTagArgs;
+	const appPath = requireArg(args, 'app-path');
+	const serviceName = requireArg(args, 'service-name');
+	const tag = requireArg(args, 'tag');
+	const repo = requireArg(args, 'repo');
+	const digest = requireArg(args, 'digest');
 	const composePath = path.join(appPath, 'docker-compose.yml');
 	const content = fs.readFileSync(composePath, 'utf8');
 	const result = updateComposeImageTag(content, { serviceName, repo, tag, digest });

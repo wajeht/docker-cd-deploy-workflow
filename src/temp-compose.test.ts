@@ -12,9 +12,10 @@ import {
 	dependsOnServices,
 	detectHost,
 	rewriteComposeForTempDeploy,
-} from './temp-compose.js';
+} from './temp-compose.ts';
+import type { ComposeDocument } from './temp-compose.ts';
 
-const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'temp-compose.js');
+const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'temp-compose.ts');
 
 describe('collectHosts', () => {
 	it('collects all unique hosts from labels', () => {
@@ -70,6 +71,7 @@ describe('detectHost', () => {
 			},
 		};
 		const host = detectHost(services);
+		assert.ok(host);
 		const domain = host.split('.').slice(1).join('.');
 		const hostname = `pr-148-close-powerlifting.${domain}`;
 		assert.strictEqual(hostname, 'pr-148-close-powerlifting.jaw.dev');
@@ -473,15 +475,15 @@ describe('temp-compose', () => {
 				'wajeht',
 			]);
 
-			const rewritten = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'));
+			const rewritten = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8')) as ComposeDocument;
 
 			assert.deepStrictEqual(rewritten['x-docker-cd'], { rolling_update: false });
 			assert.deepStrictEqual(Object.keys(rewritten.services).sort(), ['demo', 'demo-db']);
 			assert.strictEqual(rewritten.services.demo.image, 'ghcr.io/wajeht/demo:abc1234');
 			assert.strictEqual(rewritten.services['demo-db'].container_name, undefined);
-			assert.deepStrictEqual(Object.keys(rewritten.networks).sort(), ['internal', 'traefik']);
-			assert.deepStrictEqual(Object.keys(rewritten.volumes), ['db']);
-			assert.strictEqual(rewritten.services.demo.labels[1], 'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)');
+			assert.deepStrictEqual(Object.keys(rewritten.networks!).sort(), ['internal', 'traefik']);
+			assert.deepStrictEqual(Object.keys(rewritten.volumes!), ['db']);
+			assert.strictEqual(rewritten.services.demo.labels![1], 'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)');
 			assert.strictEqual(fs.existsSync(path.join(tempPath, 'docker-cd.yml')), false);
 		} finally {
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -527,7 +529,7 @@ describe('temp-compose', () => {
 				'oauth2-admin@file',
 			]);
 
-			const rewritten = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'));
+			const rewritten = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8')) as ComposeDocument;
 
 			assert.deepStrictEqual(rewritten.services.demo.labels, [
 				'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)',

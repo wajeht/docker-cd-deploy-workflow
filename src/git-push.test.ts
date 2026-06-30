@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { main } from './git-push.js';
+import { main } from './git-push.ts';
 
-const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'git-push.js');
+const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'git-push.ts');
 
-function writeFakeGit(binDir) {
+function writeFakeGit(binDir: string): void {
 	const gitPath = path.join(binDir, 'git');
 	fs.writeFileSync(
 		gitPath,
@@ -32,7 +32,7 @@ function writeFakeGit(binDir) {
 	fs.chmodSync(gitPath, 0o755);
 }
 
-function runGitPush(args, env = {}) {
+function runGitPush(args: string[], env: NodeJS.ProcessEnv = {}): string[][] {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'));
 	const binDir = path.join(dir, 'bin');
 	const logPath = path.join(dir, 'git.log');
@@ -58,7 +58,7 @@ function runGitPush(args, env = {}) {
 			.trim()
 			.split('\n')
 			.filter(Boolean)
-			.map((line) => JSON.parse(line));
+			.map((line) => JSON.parse(line) as string[]);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}

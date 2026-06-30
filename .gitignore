@@ -1,5 +1,6 @@
 built
 dist
+*.tsbuildinfo
 node_modules
 CLAUDE.md
 .claude

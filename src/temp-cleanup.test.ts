@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { main } from './temp-cleanup.js';
+import { main } from './temp-cleanup.ts';
 
 describe('temp-cleanup', () => {
 	it('removes the matching temp stack', async () => {

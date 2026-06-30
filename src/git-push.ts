@@ -3,8 +3,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-export async function main(argv = process.argv.slice(2)) {
-	const { values: args } = parseArgs({
+type GitPushArgs = {
+	message?: string;
+	paths?: string;
+	all?: boolean;
+};
+
+function requireArg(args: GitPushArgs, key: keyof GitPushArgs): string {
+	const value = args[key];
+	if (typeof value !== 'string' || !value) throw new Error(`Missing required arg: --${key}`);
+	return value;
+}
+
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+	const { values } = parseArgs({
 		args: argv,
 		options: {
 			message: { type: 'string' },
@@ -12,26 +24,25 @@ export async function main(argv = process.argv.slice(2)) {
 			all: { type: 'boolean' },
 		},
 	});
-	if (!args['message']) throw new Error('Missing required arg: --message');
-	function run(cmd, cmdArgs) {
+	const args = values as GitPushArgs;
+	const message = requireArg(args, 'message');
+	function run(cmd: string, cmdArgs: string[]): Buffer {
 		console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
 		return execFileSync(cmd, cmdArgs, { stdio: 'inherit' });
 	}
 
-	if (!args['paths'] && !args['all']) {
+	const paths = args.paths;
+	const all = args.all === true;
+	if (!paths && !all) {
 		throw new Error('Missing required arg: --paths or --all');
 	}
-
-	const message = args['message'];
-	const paths = args['paths'];
-	const all = args['all'] === true;
 
 	run('git', ['config', 'user.name', 'github-actions[bot]']);
 	run('git', ['config', 'user.email', 'github-actions[bot]@users.noreply.github.com']);
 
 	if (all) {
 		run('git', ['add', '-A']);
-	} else {
+	} else if (paths) {
 		try {
 			run('git', ['add', paths]);
 		} catch {

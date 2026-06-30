@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { imageRepository, updateComposeImageTag } from './update-tag.js';
+import { imageRepository, updateComposeImageTag } from './update-tag.ts';
 
 describe('imageRepository', () => {
 	it('removes tags and digests', () => {
