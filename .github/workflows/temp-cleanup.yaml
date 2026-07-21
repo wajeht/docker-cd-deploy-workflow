@@ -27,13 +27,13 @@ jobs:
       deployments: write
     steps:
       - name: Checkout home-ops
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.home-ops-repo }}
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Checkout deploy workflow scripts
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: wajeht/docker-cd-deploy-workflow
           token: ${{ secrets.GH_TOKEN }}
