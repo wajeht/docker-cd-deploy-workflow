@@ -11,15 +11,16 @@
 
 ## Scripts
 
-Node.js 26 ESM scripts. YAML parsing uses `js-yaml`.
+Node.js 26 ESM TypeScript scripts. YAML parsing uses `js-yaml`.
+Run `npm test` for typecheck plus tests. Run `npm run build` to compile scripts into `dist/`.
 
 | Script | Used by | Description |
 |--------|---------|-------------|
-| `src/update-tag.js` | `deploy.yaml` | Updates a `ghcr.io` image tag in a compose file, pinned to the digest |
-| `src/temp-compose.js` | `temp-deploy.yaml` | Builds the temp deploy compose file, including optional auth middleware rewrites |
-| `src/deployment.js` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates or cleans up GitHub Deployments for PR environments |
-| `src/temp-cleanup.js` | `temp-cleanup.yaml` | Removes the temp deploy app directory |
-| `src/git-push.js` | all deploy workflows | Commits and pushes with retry on conflict |
+| `src/update-tag.ts` | `deploy.yaml` | Updates a `ghcr.io` image tag in a compose file, pinned to the digest |
+| `src/temp-compose.ts` | `temp-deploy.yaml` | Builds the temp deploy compose file, including optional auth middleware rewrites |
+| `src/deployment.ts` | `temp-deploy.yaml`, `temp-cleanup.yaml` | Creates or cleans up GitHub Deployments for PR environments |
+| `src/temp-cleanup.ts` | `temp-cleanup.yaml` | Removes the temp deploy app directory |
+| `src/git-push.ts` | all deploy workflows | Commits and pushes with retry on conflict |
 
 ## Secrets
 

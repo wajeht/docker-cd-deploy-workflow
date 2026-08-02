@@ -154,7 +154,7 @@ jobs:
 
 ## What Gets Rewritten
 
-`src/temp-compose.js` copies the prod app directory and changes:
+`src/temp-compose.ts` copies the prod app directory and changes:
 
 - service set: keeps `service-name` plus recursive `depends_on` services
 - image tag: updates only `ghcr.io/<owner>/*` images
