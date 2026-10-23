@@ -3,7 +3,31 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-function createGitHubApi(token, repo) {
+type GitHubApi = (apiPath: string, options?: RequestInit) => Promise<Response>;
+
+type GitHubDeployment = {
+	id: number;
+};
+
+type DeploymentArgs = {
+	token?: string;
+	repo?: string;
+	action?: string;
+	environment?: string;
+	ref?: string;
+	production?: string;
+	url?: string;
+	'deployment-id'?: string;
+	'skip-health-check'?: string;
+};
+
+function requireArg(args: DeploymentArgs, key: keyof DeploymentArgs): string {
+	const value = args[key];
+	if (!value) throw new Error(`Missing required arg: --${key}`);
+	return value;
+}
+
+function createGitHubApi(token: string, repo: string): GitHubApi {
 	const apiBase = `https://api.github.com/repos/${repo}`;
 	const headers = {
 		Authorization: `Bearer ${token}`,
@@ -12,17 +36,17 @@ function createGitHubApi(token, repo) {
 		'X-GitHub-Api-Version': '2022-11-28',
 	};
 
-	return async function githubApi(path, options = {}) {
-		const res = await fetch(`${apiBase}${path}`, { headers, ...options });
+	return async function githubApi(apiPath: string, options: RequestInit = {}) {
+		const res = await fetch(`${apiBase}${apiPath}`, { headers, ...options });
 		if (!res.ok) {
-			throw new Error(`GitHub API ${options.method || 'GET'} ${path}: ${res.status} ${await res.text()}`);
+			throw new Error(`GitHub API ${options.method || 'GET'} ${apiPath}: ${res.status} ${await res.text()}`);
 		}
 		return res;
 	};
 }
 
-async function requestDeployment(githubApi, args) {
-	const environment = args['environment'];
+async function requestDeployment(githubApi: GitHubApi, args: DeploymentArgs): Promise<void> {
+	const environment = requireArg(args, 'environment');
 	const ref = args['ref'] || 'main';
 	const production = args['production'] === 'true';
 	const res = await githubApi('/deployments', {
@@ -36,7 +60,7 @@ async function requestDeployment(githubApi, args) {
 			production_environment: production,
 		}),
 	});
-	const deployment = await res.json();
+	const deployment = (await res.json()) as GitHubDeployment;
 
 	await githubApi(`/deployments/${deployment.id}/statuses`, {
 		method: 'POST',
@@ -54,8 +78,8 @@ async function requestDeployment(githubApi, args) {
 	}
 }
 
-async function markDeploymentSuccess(githubApi, args) {
-	const environment = args['environment'];
+async function markDeploymentSuccess(githubApi: GitHubApi, args: DeploymentArgs): Promise<void> {
+	const environment = requireArg(args, 'environment');
 	const url = args['url'];
 	const deploymentId = args['deployment-id'];
 	const skipHealthCheck = args['skip-health-check'] === 'true';
@@ -99,10 +123,10 @@ async function markDeploymentSuccess(githubApi, args) {
 	console.log(`Deployment ${deploymentId} for ${environment} -> ${url}`);
 }
 
-async function cleanupDeployments(githubApi, args) {
-	const environment = args['environment'];
+async function cleanupDeployments(githubApi: GitHubApi, args: DeploymentArgs): Promise<void> {
+	const environment = requireArg(args, 'environment');
 	const res = await githubApi(`/deployments?environment=${encodeURIComponent(environment)}&per_page=100`);
-	const deployments = await res.json();
+	const deployments = (await res.json()) as GitHubDeployment[];
 
 	for (const deployment of deployments) {
 		await githubApi(`/deployments/${deployment.id}/statuses`, {
@@ -121,8 +145,8 @@ async function cleanupDeployments(githubApi, args) {
 	console.log(`Cleaned up ${deployments.length} deployment(s) for ${environment}`);
 }
 
-export async function main(argv = process.argv.slice(2)) {
-	const { values: args } = parseArgs({
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+	const { values } = parseArgs({
 		args: argv,
 		options: {
 			token: { type: 'string' },
@@ -136,11 +160,10 @@ export async function main(argv = process.argv.slice(2)) {
 			'skip-health-check': { type: 'string' },
 		},
 	});
-	for (const key of ['token', 'repo', 'action', 'environment']) {
-		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
-	}
-	const action = args['action'];
-	const githubApi = createGitHubApi(args['token'], args['repo']);
+	const args = values as DeploymentArgs;
+	const action = requireArg(args, 'action');
+	const githubApi = createGitHubApi(requireArg(args, 'token'), requireArg(args, 'repo'));
+	requireArg(args, 'environment');
 
 	if (action === 'request') {
 		await requestDeployment(githubApi, args);
