@@ -4,6 +4,10 @@ name: Deploy
 on:
   workflow_call:
     inputs:
+      runs-on:
+        type: string
+        default: '["ubuntu-latest"]'
+        description: "Runner labels as a JSON array"
       home-ops-repo:
         type: string
         default: wajeht/home-ops
@@ -33,7 +37,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
     environment:
       name: production
       url: ${{ inputs.url || format('https://{0}.jaw.dev', github.event.repository.name) }}

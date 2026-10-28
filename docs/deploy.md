@@ -35,6 +35,7 @@ jobs:
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
+| `runs-on` | No | `["ubuntu-latest"]` | Runner labels as JSON, e.g. `["self-hosted","linux","walker","docker"]` |
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | App directory, like `apps/bang` |
 | `service-name` | Yes | - | Compose service to update, like `bang` |
