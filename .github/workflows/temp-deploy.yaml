@@ -75,7 +75,7 @@ jobs:
       - name: Request deployment
         id: deployment
         run: |
-          node .deploy-workflow/src/deployment.js \
+          node .deploy-workflow/src/deployment.ts \
             --action request \
             --token "${{ github.token }}" \
             --repo "${{ github.repository }}" \
@@ -85,7 +85,7 @@ jobs:
       - name: Rewrite compose for temp deploy
         id: rewrite
         run: |
-          node .deploy-workflow/src/temp-compose.js \
+          node .deploy-workflow/src/temp-compose.ts \
             --app-path "${{ inputs.app-path }}" \
             --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \
@@ -96,13 +96,13 @@ jobs:
 
       - name: Commit and push
         run: |
-          node .deploy-workflow/src/git-push.js \
+          node .deploy-workflow/src/git-push.ts \
             --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
             --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
 
       - name: Mark deployment success
         run: |
-          node .deploy-workflow/src/deployment.js \
+          node .deploy-workflow/src/deployment.ts \
             --action deploy \
             --token "${{ github.token }}" \
             --repo "${{ github.repository }}" \

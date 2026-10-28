@@ -3,19 +3,28 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-export async function main(argv = process.argv.slice(2)) {
-	const { values: args } = parseArgs({
+type TempCleanupArgs = {
+	'app-path'?: string;
+	'pr-number'?: string;
+};
+
+function requireArg(args: TempCleanupArgs, key: keyof TempCleanupArgs): string {
+	const value = args[key];
+	if (!value) throw new Error(`Missing required arg: --${key}`);
+	return value;
+}
+
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+	const { values } = parseArgs({
 		args: argv,
 		options: {
 			'app-path': { type: 'string' },
 			'pr-number': { type: 'string' },
 		},
 	});
-	for (const key of ['app-path', 'pr-number']) {
-		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
-	}
-	const appPath = args['app-path'];
-	const prNumber = args['pr-number'];
+	const args = values as TempCleanupArgs;
+	const appPath = requireArg(args, 'app-path');
+	const prNumber = requireArg(args, 'pr-number');
 	const tempPath = `${appPath}-pr-${prNumber}`;
 
 	if (!fs.existsSync(tempPath)) {

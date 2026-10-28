@@ -1,18 +1,35 @@
-import { describe, it } from 'node:test';
+import { describe, it, type TestContext } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { main } from './deployment.js';
+import { main } from './deployment.ts';
 
-function fakeFetch(responses) {
-	const calls = [];
-	async function fetch(url, options = {}) {
+type FakeResponse = {
+	ok?: boolean;
+	status?: number;
+	json?: unknown;
+	text?: string;
+};
+
+type FetchCall = {
+	url: string | URL | Request;
+	method: string;
+	body: unknown;
+};
+
+type FakeFetch = ((url: string | URL | Request, options?: RequestInit) => Promise<Response>) & {
+	calls: FetchCall[];
+};
+
+function fakeFetch(responses: FakeResponse[]): FakeFetch {
+	const calls: FetchCall[] = [];
+	async function fetchMock(url: string | URL | Request, options: RequestInit = {}) {
 		const response = responses.shift() || {};
 		calls.push({
 			url,
 			method: options.method || 'GET',
-			body: options.body ? JSON.parse(options.body) : null,
+			body: typeof options.body === 'string' ? JSON.parse(options.body) : null,
 		});
 		return {
 			ok: response.ok ?? true,
@@ -23,21 +40,21 @@ function fakeFetch(responses) {
 			async text() {
 				return response.text ?? '';
 			},
-		};
+		} as Response;
 	}
-	fetch.calls = calls;
-	return fetch;
+	fetchMock.calls = calls;
+	return fetchMock;
 }
 
-function withFetch(t, fetch) {
+function withFetch(t: TestContext, fetchMock: FakeFetch): void {
 	const previous = globalThis.fetch;
-	globalThis.fetch = fetch;
+	globalThis.fetch = fetchMock;
 	t.after(() => {
 		globalThis.fetch = previous;
 	});
 }
 
-function withGithubOutput(t) {
+function withGithubOutput(t: TestContext): string {
 	const previous = process.env.GITHUB_OUTPUT;
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'));
 	const outputFile = path.join(dir, 'output');

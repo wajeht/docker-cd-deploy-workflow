@@ -4,7 +4,9 @@
   "description": "Reusable GitHub Actions workflow for instant Docker deploys. When an app repo pushes a tag, this workflow updates the image tag in your home-ops repo, triggering docker-cd to deploy.",
   "type": "module",
   "scripts": {
-    "test": "node --test src/*.test.js"
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && node --test src/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -19,5 +21,10 @@
   "homepage": "https://github.com/wajeht/docker-cd-deploy-workflow#readme",
   "dependencies": {
     "js-yaml": "^4.1.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^26.0.1",
+    "typescript": "^6.0.3"
   }
 }

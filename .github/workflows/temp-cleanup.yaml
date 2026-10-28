@@ -46,19 +46,19 @@ jobs:
 
       - name: Remove temp stack
         run: |
-          node .deploy-workflow/src/temp-cleanup.js \
+          node .deploy-workflow/src/temp-cleanup.ts \
             --app-path "${{ inputs.app-path }}" \
             --pr-number "${{ github.event.pull_request.number }}"
 
       - name: Commit and push
         run: |
-          node .deploy-workflow/src/git-push.js \
+          node .deploy-workflow/src/git-push.ts \
             --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
             --message "chore(${{ github.event.repository.name }}): remove temp deploy pr-${{ github.event.pull_request.number }}"
 
       - name: Cleanup GitHub deployment
         run: |
-          node .deploy-workflow/src/deployment.js \
+          node .deploy-workflow/src/deployment.ts \
             --action cleanup \
             --token "${{ github.token }}" \
             --repo "${{ github.repository }}" \
