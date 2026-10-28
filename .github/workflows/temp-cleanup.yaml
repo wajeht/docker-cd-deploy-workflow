@@ -4,6 +4,10 @@ name: Temp Cleanup
 on:
   workflow_call:
     inputs:
+      runs-on:
+        type: string
+        default: '["ubuntu-latest"]'
+        description: "Runner labels as a JSON array"
       home-ops-repo:
         type: string
         default: wajeht/home-ops
@@ -22,7 +26,7 @@ concurrency:
 
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
     permissions:
       deployments: write
     steps:
