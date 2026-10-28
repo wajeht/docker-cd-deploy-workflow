@@ -222,6 +222,7 @@ Recommended label behavior:
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
+| `runs-on` | No | `["ubuntu-latest"]` | Runner labels as a JSON array |
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Base app path, like `apps/bang` |
 | `service-name` | Yes | - | Compose service to deploy, like `bang` |
@@ -232,5 +233,6 @@ Recommended label behavior:
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
+| `runs-on` | No | `["ubuntu-latest"]` | Runner labels as a JSON array |
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Base app path, like `apps/bang` |
