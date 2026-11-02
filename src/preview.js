@@ -97,11 +97,12 @@ export function removePreview(appPath, prNumber) {
 
 	if (!fs.existsSync(tempPath)) {
 		console.log(`Temp stack ${tempPath} does not exist, nothing to clean up`);
-		return;
+		return tempPath;
 	}
 
 	fs.rmSync(tempPath, { recursive: true });
 	console.log(`Removed temp stack at ${tempPath}`);
+	return tempPath;
 }
 
 export function serviceLabels(service) {
@@ -546,7 +547,11 @@ export async function main(argv = process.argv.slice(2)) {
 		}
 	}
 	if (args.action === 'cleanup') {
-		removePreview(args['app-path'], args['pr-number']);
+		const tempPath = removePreview(args['app-path'], args['pr-number']);
+		const outputFile = process.env.GITHUB_OUTPUT;
+		if (outputFile) {
+			fs.appendFileSync(outputFile, `temp-path=${tempPath}\n`);
+		}
 		return;
 	}
 	for (const key of ['service-name', 'tag', 'repo-owner']) {

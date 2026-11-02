@@ -22,7 +22,7 @@ Node.js 26 ESM scripts. YAML parsing uses `js-yaml`.
 
 Each script exports its functions for tests and runs its CLI only when invoked directly. Tests live beside each module as `<name>.test.js`.
 
-`preview.js --action create` requires `--app-path`, `--pr-number`, `--service-name`, `--tag`, and `--repo-owner`. It also accepts `--auth-middleware` and `--app-repo-path`. Cleanup requires only `--app-path` and `--pr-number`. App paths must be direct children of an `apps` directory; absolute paths are accepted and normalized. PR numbers must be positive integers.
+`preview.js --action create` requires `--app-path`, `--pr-number`, `--service-name`, `--tag`, and `--repo-owner`. It also accepts `--auth-middleware` and `--app-repo-path`. Cleanup requires only `--app-path` and `--pr-number`. App paths must be direct children of an `apps` directory; absolute paths are accepted and normalized. PR numbers must be positive integers. Both actions emit the canonical preview directory as `temp-path` through `GITHUB_OUTPUT`; workflows stage that output rather than rebuilding the path.
 
 `git.js` accepts repeated `--paths` arguments or `--all`, plus `--message`. Preview workflows explicitly select the preview directory and Tinyauth Compose file so both changes are committed together.
 

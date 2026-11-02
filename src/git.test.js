@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import yaml from 'js-yaml';
 import { main } from './git.js';
 import {
 	updateAccess,
@@ -14,6 +15,8 @@ import {
 	parseAuthEnvironment,
 } from './preview.js';
 import { isDeploymentCurrent } from './deployment.js';
+
+const REGEX_STAGE_PATH = /--paths "([^"]+)"/;
 
 const REGEX_REQUIRED_PATHS = /Missing required arg: --paths or --all/;
 const REGEX_PUSH_CONFLICT = /Concurrent changes conflict/;
@@ -279,6 +282,148 @@ describe('git', function () {
 			);
 		} finally {
 			process.chdir(cwd);
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+	it('commits preview creation and cleanup using workflow output paths', function () {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-workflow-'));
+		const checkout = path.join(dir, 'checkout');
+		const remote = path.join(dir, 'remote.git');
+		const outputFile = path.join(dir, 'output');
+		const source = path.dirname(SCRIPT_PATH);
+		const workflowDir = path.resolve(source, '..', '.github/workflows');
+		const deploy = yaml.load(
+			fs.readFileSync(path.join(workflowDir, 'temp-deploy.yaml'), 'utf8'),
+		);
+		const cleanup = yaml.load(
+			fs.readFileSync(path.join(workflowDir, 'temp-cleanup.yaml'), 'utf8'),
+		);
+
+		function runGit(directory, ...args) {
+			return execFileSync('git', args, {
+				cwd: directory,
+				encoding: 'utf8',
+				stdio: 'pipe',
+			}).trim();
+		}
+		function runPreview(action, appPath) {
+			fs.writeFileSync(outputFile, '');
+			const args = [
+				'--action',
+				action,
+				'--app-path',
+				appPath,
+				'--pr-number',
+				'42',
+			];
+			if (action === 'create') {
+				args.push(
+					'--service-name',
+					'demo',
+					'--tag',
+					'new',
+					'--repo-owner',
+					'test',
+				);
+			}
+			execFileSync(
+				process.execPath,
+				[path.join(source, 'preview.js'), ...args],
+				{
+					cwd: checkout,
+					env: { ...process.env, GITHUB_OUTPUT: outputFile },
+					stdio: 'pipe',
+				},
+			);
+			for (const line of fs.readFileSync(outputFile, 'utf8').split('\n')) {
+				if (line.startsWith('temp-path=')) {
+					return line.slice('temp-path='.length);
+				}
+			}
+			assert.fail('Preview action did not emit its canonical path');
+		}
+		function commitWorkflow(workflow, appPath, previewPath) {
+			const job = Object.values(workflow.jobs)[0];
+			const previewStep = job.steps.find((step) =>
+				step.run?.includes('src/preview.js'),
+			);
+			const commitStep = job.steps.find(
+				(step) => step.name === 'Commit and push',
+			);
+			const command = commitStep.run
+				.replaceAll('${{ inputs.app-path }}', appPath)
+				.replaceAll('${{ github.event.pull_request.number }}', '42')
+				.replaceAll(
+					`\${{ steps.${previewStep.id}.outputs.temp-path }}`,
+					previewPath,
+				);
+			const match = command.match(REGEX_STAGE_PATH);
+			assert.ok(match, 'Workflow must explicitly select the preview path');
+			execFileSync(
+				process.execPath,
+				[
+					SCRIPT_PATH,
+					'--paths',
+					match[1],
+					'--paths',
+					AUTH_PATH,
+					'--message',
+					'preview lifecycle',
+				],
+				{
+					cwd: checkout,
+					stdio: 'pipe',
+				},
+			);
+		}
+
+		try {
+			runGit(dir, 'init', '--bare', '--initial-branch=main', remote);
+			runGit(dir, 'clone', remote, checkout);
+			runGit(checkout, 'config', 'core.fsmonitor', 'false');
+			runGit(checkout, 'config', 'user.name', 'Test');
+			runGit(checkout, 'config', 'user.email', 'test@example.com');
+			fs.mkdirSync(path.join(checkout, 'apps/demo'), { recursive: true });
+			fs.writeFileSync(
+				path.join(checkout, 'apps/demo/docker-compose.yml'),
+				'services:\n  demo:\n    image: ghcr.io/test/demo:old\n    labels:\n      - traefik.http.routers.demo.rule=Host(`demo.example.com`)\n',
+			);
+			runGit(checkout, 'add', 'apps');
+			runGit(checkout, 'commit', '-m', 'initial');
+			runGit(checkout, 'push', '-u', 'origin', 'main');
+
+			for (const appPath of ['apps/demo/', 'apps/demo/.']) {
+				const previewPath = runPreview('create', appPath);
+				commitWorkflow(deploy, appPath, previewPath);
+				assert.strictEqual(
+					runGit(
+						remote,
+						'ls-tree',
+						'-r',
+						'--name-only',
+						'HEAD',
+						'--',
+						'apps/demo-pr-42',
+					),
+					'apps/demo-pr-42/docker-compose.yml',
+				);
+				assert.strictEqual(runPreview('cleanup', appPath), previewPath);
+				commitWorkflow(cleanup, appPath, previewPath);
+				assert.strictEqual(
+					runGit(
+						remote,
+						'ls-tree',
+						'-r',
+						'--name-only',
+						'HEAD',
+						'--',
+						'apps/demo-pr-42',
+					),
+					'',
+				);
+				assert.strictEqual(runPreview('cleanup', appPath), previewPath);
+			}
+		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
 	});
