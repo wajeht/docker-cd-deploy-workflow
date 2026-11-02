@@ -8,14 +8,17 @@ import { fileURLToPath } from 'node:url';
 import { main } from './git.js';
 import {
 	updateAccess,
-	authPath,
+	AUTH_PATH,
 	previewId,
-	adminAllow,
+	ADMIN_ALLOW,
 	parseAuthEnvironment,
 } from './preview.js';
 import { isDeploymentCurrent } from './deployment.js';
 
-const scriptPath = path.join(
+const REGEX_REQUIRED_PATHS = /Missing required arg: --paths or --all/;
+const REGEX_PUSH_CONFLICT = /Concurrent changes conflict/;
+
+const SCRIPT_PATH = path.join(
 	path.dirname(fileURLToPath(import.meta.url)),
 	'git.js',
 );
@@ -29,6 +32,7 @@ function writeFakeGit(binDir) {
 			"import fs from 'node:fs';",
 			'const args = process.argv.slice(2);',
 			'fs.appendFileSync(process.env.GIT_LOG, `${JSON.stringify(args)}\\n`);',
+			"if (args.join(' ') === 'diff --staged --quiet' && process.env.GIT_DIFF_ERROR === 'true') process.exit(2);",
 			"if (args.join(' ') === 'diff --staged --quiet' && process.env.GIT_DIFF_HAS_CHANGES === 'true') {",
 			'  process.exit(1);',
 			'}',
@@ -55,7 +59,7 @@ function runGitPush(args, env = {}) {
 		fs.mkdirSync(binDir);
 		writeFakeGit(binDir);
 
-		execFileSync(process.execPath, [scriptPath, ...args], {
+		execFileSync(process.execPath, [SCRIPT_PATH, ...args], {
 			cwd: dir,
 			env: {
 				...process.env,
@@ -67,19 +71,20 @@ function runGitPush(args, env = {}) {
 			stdio: 'pipe',
 		});
 
-		return fs
-			.readFileSync(logPath, 'utf8')
-			.trim()
-			.split('\n')
-			.filter(Boolean)
-			.map((line) => JSON.parse(line));
+		const calls = [];
+		for (const line of fs.readFileSync(logPath, 'utf8').trim().split('\n')) {
+			if (line) {
+				calls.push(JSON.parse(line));
+			}
+		}
+		return calls;
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 }
 
-describe('git', () => {
-	it('commits selected paths and pushes', () => {
+describe('git', function () {
+	it('commits selected paths and pushes', function () {
 		const calls = runGitPush(
 			['--paths', 'apps/demo', '--message', 'chore: deploy demo'],
 			{
@@ -97,7 +102,7 @@ describe('git', () => {
 		]);
 	});
 
-	it('commits all changes when --all is set', () => {
+	it('commits all changes when --all is set', function () {
 		const calls = runGitPush(['--all', '--message', 'chore: cleanup demo'], {
 			GIT_DIFF_HAS_CHANGES: 'true',
 		});
@@ -105,7 +110,7 @@ describe('git', () => {
 		assert.deepStrictEqual(calls[2], ['add', '-A']);
 	});
 
-	it('stops when there are no staged changes', () => {
+	it('stops when there are no staged changes', function () {
 		const calls = runGitPush([
 			'--paths',
 			'apps/demo',
@@ -121,7 +126,7 @@ describe('git', () => {
 		]);
 	});
 
-	it('rebases and retries when push fails', () => {
+	it('rebases and retries when push fails', function () {
 		const calls = runGitPush(
 			['--paths', 'apps/demo', '--message', 'chore: deploy demo'],
 			{
@@ -137,14 +142,22 @@ describe('git', () => {
 		]);
 	});
 
-	it('requires paths or all', async () => {
-		await assert.rejects(
-			() => main(['--message', 'chore: deploy demo']),
-			/Missing required arg: --paths or --all/,
+	it('does not commit when the staged diff command fails', () => {
+		assert.throws(() =>
+			runGitPush(['--paths', 'apps/demo', '--message', 'preview'], {
+				GIT_DIFF_ERROR: 'true',
+			}),
 		);
 	});
 
-	it('stages the preview and Tinyauth config in the same commit', () => {
+	it('requires paths or all', async () => {
+		await assert.rejects(
+			() => main(['--message', 'chore: deploy demo']),
+			REGEX_REQUIRED_PATHS,
+		);
+	});
+
+	it('stages the preview and Tinyauth config in the same commit', function () {
 		const calls = runGitPush(
 			[
 				'--paths',
@@ -165,7 +178,7 @@ describe('git', () => {
 		);
 	});
 
-	it('fails safely on a concurrent ACL conflict and preserves both rules after rerun', async () => {
+	it('fails safely on a concurrent ACL conflict and preserves both rules after rerun', async function () {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-conflict-'));
 		const cwd = process.cwd();
 		function runGit(directory, ...args) {
@@ -179,16 +192,18 @@ describe('git', () => {
 		const second = path.join(dir, 'second');
 		const config =
 			'x-docker-cd:\n  rolling_update: false\nservices:\n  tinyauth:\n    environment:\n      TINYAUTH_AUTH_ACLS_POLICY: deny\n';
-		const rule = (pr) => ({
-			appPath: 'apps/demo',
-			prNumber: pr,
-			hostname: `pr-${pr}-demo.example.com`,
-			allowlist: adminAllow,
-		});
+		function rule(pr) {
+			return {
+				appPath: 'apps/demo',
+				prNumber: pr,
+				hostname: `pr-${pr}-demo.example.com`,
+				allowlist: ADMIN_ALLOW,
+			};
+		}
 		function pushPreview() {
 			return execFileSync(
 				process.execPath,
-				[scriptPath, '--paths', authPath, '--message', 'preview'],
+				[SCRIPT_PATH, '--paths', AUTH_PATH, '--message', 'preview'],
 				{ cwd: first, stdio: 'pipe' },
 			);
 		}
@@ -198,7 +213,7 @@ describe('git', () => {
 			runGit(first, 'config', 'user.name', 'Test');
 			runGit(first, 'config', 'user.email', 'test@example.com');
 			fs.mkdirSync(path.join(first, 'apps/tinyauth'), { recursive: true });
-			fs.writeFileSync(path.join(first, authPath), config);
+			fs.writeFileSync(path.join(first, AUTH_PATH), config);
 			runGit(first, 'add', '.');
 			runGit(first, 'commit', '-m', 'initial');
 			runGit(first, 'push', 'origin', 'main');
@@ -206,33 +221,35 @@ describe('git', () => {
 			runGit(second, 'config', 'user.name', 'Test');
 			runGit(second, 'config', 'user.email', 'test@example.com');
 			const other = updateAccess(config, rule('43'));
-			fs.writeFileSync(path.join(second, authPath), other);
+			fs.writeFileSync(path.join(second, AUTH_PATH), other);
 			runGit(second, 'add', '.');
 			runGit(second, 'commit', '-m', 'preview 43');
 			runGit(second, 'push', 'origin', 'main');
 			fs.writeFileSync(
-				path.join(first, authPath),
+				path.join(first, AUTH_PATH),
 				updateAccess(config, rule('42')),
 			);
-			assert.throws(pushPreview, /Concurrent changes conflict/);
+			assert.throws(pushPreview, REGEX_PUSH_CONFLICT);
 			assert.strictEqual(
-				runGit(first, 'show', `origin/main:${authPath}`),
+				runGit(first, 'show', `origin/main:${AUTH_PATH}`),
 				other.trim(),
 			);
 			runGit(first, 'rebase', '--abort');
 			runGit(first, 'reset', '--hard', 'origin/main');
 			const previous = runGit(first, 'rev-parse', 'HEAD');
 			fs.writeFileSync(
-				path.join(first, authPath),
+				path.join(first, AUTH_PATH),
 				updateAccess(other, rule('42')),
 			);
 			pushPreview();
 			const current = runGit(first, 'rev-parse', 'HEAD');
-			const env = parseAuthEnvironment(runGit(first, 'show', `HEAD:${authPath}`));
+			const env = parseAuthEnvironment(
+				runGit(first, 'show', `HEAD:${AUTH_PATH}`),
+			);
 			for (const pr of ['42', '43']) {
 				assert.strictEqual(
 					env[`TINYAUTH_APPS_${previewId('apps/demo', pr)}_OAUTH_WHITELIST`],
-					adminAllow,
+					ADMIN_ALLOW,
 				);
 			}
 			process.chdir(first);
@@ -248,8 +265,8 @@ describe('git', () => {
 				isDeploymentCurrent(current, previous, 'apps/demo-pr-42', true),
 				false,
 			);
-			fs.appendFileSync(authPath, '# changed global auth configuration\n');
-			runGit(first, 'add', authPath);
+			fs.appendFileSync(AUTH_PATH, '# changed global auth configuration\n');
+			runGit(first, 'add', AUTH_PATH);
 			runGit(first, 'commit', '-m', 'change auth configuration');
 			assert.strictEqual(
 				isDeploymentCurrent(

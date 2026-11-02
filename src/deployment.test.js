@@ -5,13 +5,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { main, waitForTinyauth } from './deployment.js';
 
+const REGEX_GITHUB_FAILURE =
+	/GitHub API GET \/deployments\?environment=temp%2Fpr-1&per_page=100: 500$/;
+const REGEX_TIMEOUT = /Timed out/;
+const REGEX_AUTHENTICATION = /authentication/;
+
 function createFetchStub(responses) {
 	const calls = [];
 	async function requestResponse(url, options = {}) {
-		const response = responses.shift() || {};
+		const response = responses.shift() ?? {};
 		calls.push({
 			url,
-			method: options.method || 'GET',
+			method: options.method ?? 'GET',
 			body: options.body ? JSON.parse(options.body) : null,
 		});
 		return {
@@ -45,7 +50,7 @@ function mockDockerCdEnvironment(t) {
 	for (const [key, value] of Object.entries(values)) {
 		const previous = process.env[key];
 		process.env[key] = value;
-		t.after(() => {
+		t.after(function () {
 			if (previous === undefined) {
 				delete process.env[key];
 			} else {
@@ -57,10 +62,12 @@ function mockDockerCdEnvironment(t) {
 
 function mockGitHubOutput(t) {
 	const previous = process.env.GITHUB_OUTPUT;
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'));
+	const dir = fs.mkdtempSync(
+		path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
+	);
 	const outputFile = path.join(dir, 'output');
 	process.env.GITHUB_OUTPUT = outputFile;
-	t.after(() => {
+	t.after(function () {
 		if (previous === undefined) {
 			delete process.env.GITHUB_OUTPUT;
 		} else {
@@ -71,8 +78,8 @@ function mockGitHubOutput(t) {
 	return outputFile;
 }
 
-describe('deployment', () => {
-	it('requests a deployment and writes the deployment id output', async (t) => {
+describe('deployment', function () {
+	it('requests a deployment and writes the deployment id output', async function (t) {
 		const fetchStub = createFetchStub([{ json: { id: 123 } }, {}]);
 		const outputFile = mockGitHubOutput(t);
 		mockFetch(t, fetchStub);
@@ -112,10 +119,13 @@ describe('deployment', () => {
 				},
 			},
 		]);
-		assert.strictEqual(fs.readFileSync(outputFile, 'utf8'), 'deployment-id=123\n');
+		assert.strictEqual(
+			fs.readFileSync(outputFile, 'utf8'),
+			'deployment-id=123\n',
+		);
 	});
 
-	it('marks a deployment successful without polling when health check is skipped', async (t) => {
+	it('marks a deployment successful without polling when health check is skipped', async function (t) {
 		const fetchStub = createFetchStub([{}]);
 		mockFetch(t, fetchStub);
 
@@ -149,11 +159,26 @@ describe('deployment', () => {
 		]);
 	});
 
-	it('cleans up all deployments for an environment', async (t) => {
-		const fetchStub = createFetchStub([{ json: [{ id: 1 }, { id: 2 }] }, {}, {}, {}, {}]);
+	it('cleans up all deployments for an environment', async function (t) {
+		const fetchStub = createFetchStub([
+			{ json: [{ id: 1 }, { id: 2 }] },
+			{},
+			{},
+			{},
+			{},
+		]);
 		mockFetch(t, fetchStub);
 
-		await main(['--token', 'token', '--repo', 'wajeht/app', '--action', 'cleanup', '--environment', 'temp/pr-1']);
+		await main([
+			'--token',
+			'token',
+			'--repo',
+			'wajeht/app',
+			'--action',
+			'cleanup',
+			'--environment',
+			'temp/pr-1',
+		]);
 
 		assert.deepStrictEqual(fetchStub.calls, [
 			{
@@ -190,17 +215,51 @@ describe('deployment', () => {
 		]);
 	});
 
-	it('surfaces GitHub API errors', async (t) => {
-		const fetchStub = createFetchStub([{ ok: false, status: 500, text: 'nope' }]);
+	it('reports GitHub status without exposing upstream response bodies', async function (t) {
+		const fetchStub = createFetchStub([
+			{ ok: false, status: 500, text: 'secret response details' },
+		]);
 		mockFetch(t, fetchStub);
 
 		await assert.rejects(
-			() => main(['--token', 'token', '--repo', 'wajeht/app', '--action', 'cleanup', '--environment', 'temp/pr-1']),
-			/GitHub API GET \/deployments\?environment=temp%2Fpr-1&per_page=100: 500 nope/,
+			() =>
+				main([
+					'--token',
+					'token',
+					'--repo',
+					'wajeht/app',
+					'--action',
+					'cleanup',
+					'--environment',
+					'temp/pr-1',
+				]),
+			REGEX_GITHUB_FAILURE,
 		);
 	});
 
-	it('checks deployed state instead of accepting a login page', async (t) => {
+	it('rejects unknown deployment actions without making a request', async function (t) {
+		mockFetch(t, async function unexpectedRequest() {
+			assert.fail('Unknown actions must not make HTTP requests');
+		});
+		for (const action of ['invalid', 'constructor', 'toString']) {
+			await assert.rejects(
+				() =>
+					main([
+						'--token',
+						'test',
+						'--repo',
+						'wajeht/app',
+						'--environment',
+						'pr-42',
+						'--action',
+						action,
+					]),
+				{ message: `Unknown action: ${action}` },
+			);
+		}
+	});
+
+	it('checks deployed state instead of accepting a login page', async function (t) {
 		mockDockerCdEnvironment(t);
 		const ready = {
 			sync: 'synced',
@@ -208,7 +267,7 @@ describe('deployment', () => {
 			health: { total: 1, running: 1, healthy: 1, starting: 0, unhealthy: 0 },
 		};
 		const options = { attempts: 1, matches: () => true };
-		mockFetch(t, async (url, request) => {
+		mockFetch(t, async function (url, request) {
 			assert.strictEqual(request.redirect, 'error');
 			assert.strictEqual(request.headers.Authorization, 'Bearer test');
 			return Response.json({ success: true, data: ready });
@@ -220,7 +279,7 @@ describe('deployment', () => {
 					...options,
 					matches: () => false,
 				}),
-			/Timed out/,
+			REGEX_TIMEOUT,
 		);
 		for (const data of [
 			{ ...ready, lastDeploy: { status: 'failed' } },
@@ -229,22 +288,22 @@ describe('deployment', () => {
 			globalThis.fetch = async () => Response.json({ success: true, data });
 			await assert.rejects(
 				() => waitForTinyauth('apps/demo-pr-42', options),
-				/Timed out/,
+				REGEX_TIMEOUT,
 			);
 		}
 		globalThis.fetch = async () => new Response('<html>login</html>');
 		await assert.rejects(
 			() => waitForTinyauth('apps/demo-pr-42', options),
-			/Timed out/,
+			REGEX_TIMEOUT,
 		);
 		globalThis.fetch = async () => new Response('', { status: 401 });
 		await assert.rejects(
 			() => waitForTinyauth('apps/demo-pr-42', options),
-			/authentication/,
+			REGEX_AUTHENTICATION,
 		);
 	});
 
-	it('parses folded middleware labels and records protected deployment failures', async (t) => {
+	it('parses folded middleware labels and records protected deployment failures', async function (t) {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-readiness-'));
 		mockDockerCdEnvironment(t);
 		t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -277,7 +336,7 @@ describe('deployment', () => {
 			'--skip-health-check',
 			'true',
 		];
-		await assert.rejects(() => main(args), /authentication/);
+		await assert.rejects(() => main(args), REGEX_AUTHENTICATION);
 		assert.strictEqual(fetchStub.calls[1].body.state, 'failure');
 
 		// Comments mentioning the middleware must not turn a public preview into a protected one.

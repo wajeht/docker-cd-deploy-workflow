@@ -7,8 +7,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import {
-	adminAllow,
-	usersAllow,
+	ADMIN_ALLOW,
+	USERS_ALLOW,
 	parseAuthEnvironment,
 	resolveInheritedAllowlist,
 	tinyauthRules,
@@ -22,13 +22,26 @@ import {
 	updateAccess,
 } from './preview.js';
 
-const scriptPath = path.join(
+const REGEX_MISSING_SERVICE = /Could not find app service "api"/;
+const REGEX_UNOWNED_RULE = /unowned/;
+const REGEX_MISSING_RULE = /Expected one/;
+const REGEX_DIFFERENT_ALLOWLISTS = /different/;
+const REGEX_DEFAULT_DENY = /deny/;
+const REGEX_RECREATION = /recreation/;
+const REGEX_MISSING_AUTH = /missing/;
+const REGEX_INVALID_PR_NUMBER = /pr-number must be a positive integer/;
+const REGEX_INVALID_DIRECTORY = /directory directly under apps/;
+const REGEX_INVALID_ACTION = /action must be create or cleanup/;
+const REGEX_REQUIRED_SERVICE = /service-name/;
+const REGEX_REQUIRED_PR = /pr-number/;
+
+const SCRIPT_PATH = path.join(
 	path.dirname(fileURLToPath(import.meta.url)),
 	'preview.js',
 );
 
-describe('hosts', () => {
-	it('collects all unique hosts from labels', () => {
+describe('hosts', function () {
+	it('collects all unique hosts from labels', function () {
 		const services = {
 			app: {
 				labels: [
@@ -44,7 +57,7 @@ describe('hosts', () => {
 		]);
 	});
 
-	it('deduplicates hosts', () => {
+	it('deduplicates hosts', function () {
 		const services = {
 			app: {
 				labels: [
@@ -56,14 +69,14 @@ describe('hosts', () => {
 		assert.deepStrictEqual(hosts(services), ['app.jaw.dev']);
 	});
 
-	it('returns empty array when no hosts', () => {
+	it('returns empty array when no hosts', function () {
 		const services = { app: { labels: ['traefik.enable=true'] } };
 		assert.deepStrictEqual(hosts(services), []);
 	});
 });
 
-describe('primaryHost', () => {
-	it('picks jaw.dev subdomain over bare/www domain (closepowerlifting bug)', () => {
+describe('primaryHost', function () {
+	it('picks jaw.dev subdomain over bare/www domain (closepowerlifting bug)', function () {
 		const services = {
 			app: {
 				labels: [
@@ -75,7 +88,7 @@ describe('primaryHost', () => {
 		assert.strictEqual(primaryHost(services), 'close-powerlifting.jaw.dev');
 	});
 
-	it('produces correct temp URL for closepowerlifting', () => {
+	it('produces correct temp URL for closepowerlifting', function () {
 		const services = {
 			app: {
 				labels: [
@@ -90,7 +103,7 @@ describe('primaryHost', () => {
 		assert.strictEqual(hostname, 'pr-148-close-powerlifting.jaw.dev');
 	});
 
-	it('works with simple subdomain host (bang.jaw.dev)', () => {
+	it('works with simple subdomain host (bang.jaw.dev)', function () {
 		const services = {
 			app: {
 				labels: ['traefik.http.routers.bang.rule=Host(`bang.jaw.dev`)'],
@@ -99,7 +112,7 @@ describe('primaryHost', () => {
 		assert.strictEqual(primaryHost(services), 'bang.jaw.dev');
 	});
 
-	it('falls back to bare domain if no subdomain exists', () => {
+	it('falls back to bare domain if no subdomain exists', function () {
 		const services = {
 			app: {
 				labels: ['traefik.http.routers.app.rule=Host(`example.com`)'],
@@ -108,21 +121,21 @@ describe('primaryHost', () => {
 		assert.strictEqual(primaryHost(services), 'example.com');
 	});
 
-	it('returns null when no Host() labels', () => {
+	it('returns null when no Host() labels', function () {
 		const services = {
 			app: { labels: ['traefik.enable=true'] },
 		};
 		assert.strictEqual(primaryHost(services), null);
 	});
 
-	it('returns null when no labels at all', () => {
+	it('returns null when no labels at all', function () {
 		const services = {
 			app: { image: 'nginx' },
 		};
 		assert.strictEqual(primaryHost(services), null);
 	});
 
-	it('handles multiple services', () => {
+	it('handles multiple services', function () {
 		const services = {
 			app: {
 				labels: ['traefik.http.routers.app.rule=Host(`myapp.com`)'],
@@ -135,12 +148,12 @@ describe('primaryHost', () => {
 	});
 });
 
-describe('serviceDependencies', () => {
+describe('serviceDependencies', function () {
 	it('reads list syntax', () => {
-		assert.deepStrictEqual(serviceDependencies({ depends_on: ['db', 'redis'] }), [
-			'db',
-			'redis',
-		]);
+		assert.deepStrictEqual(
+			serviceDependencies({ depends_on: ['db', 'redis'] }),
+			['db', 'redis'],
+		);
 	});
 
 	it('reads condition map syntax', () => {
@@ -157,8 +170,8 @@ describe('serviceDependencies', () => {
 	});
 });
 
-describe('requiredServices', () => {
-	it('keeps the app service when there are no dependencies', () => {
+describe('requiredServices', function () {
+	it('keeps the app service when there are no dependencies', function () {
 		const selected = requiredServices(
 			{ web: { image: 'nginx' }, worker: { image: 'nginx' } },
 			'web',
@@ -167,7 +180,7 @@ describe('requiredServices', () => {
 		assert.deepStrictEqual([...selected].sort(), ['web']);
 	});
 
-	it('follows recursive dependencies and skips siblings', () => {
+	it('follows recursive dependencies and skips siblings', function () {
 		const selected = requiredServices(
 			{
 				web: { depends_on: { api: { condition: 'service_started' } } },
@@ -189,8 +202,8 @@ describe('requiredServices', () => {
 	});
 });
 
-describe('preview create', () => {
-	it('uses service-name as the dependency root and router prefix', () => {
+describe('preview create', function () {
+	it('uses service-name as the dependency root and router prefix', function () {
 		const result = rewriteComposeForPreview(
 			{
 				services: {
@@ -234,7 +247,7 @@ describe('preview create', () => {
 		assert.strictEqual(result.url, 'https://pr-42-example.jaw.dev');
 	});
 
-	it('preserves existing middlewares by default', () => {
+	it('preserves existing middlewares by default', function () {
 		const result = rewriteComposeForPreview(
 			{
 				services: {
@@ -266,7 +279,7 @@ describe('preview create', () => {
 		]);
 	});
 
-	it('rewrites router names that differ from service-name', () => {
+	it('rewrites router names that differ from service-name', function () {
 		const result = rewriteComposeForPreview(
 			{
 				services: {
@@ -299,7 +312,7 @@ describe('preview create', () => {
 		]);
 	});
 
-	it('replaces existing router middlewares when auth-middleware is set', () => {
+	it('replaces existing router middlewares when auth-middleware is set', function () {
 		const result = rewriteComposeForPreview(
 			{
 				services: {
@@ -332,7 +345,7 @@ describe('preview create', () => {
 		]);
 	});
 
-	it('adds router middlewares when auth-middleware is set and no middleware label exists', () => {
+	it('adds router middlewares when auth-middleware is set and no middleware label exists', function () {
 		const result = rewriteComposeForPreview(
 			{
 				services: {
@@ -364,7 +377,7 @@ describe('preview create', () => {
 		]);
 	});
 
-	it('applies auth-middleware to each rewritten router on the service', () => {
+	it('applies auth-middleware to each rewritten router on the service', function () {
 		const result = rewriteComposeForPreview(
 			{
 				services: {
@@ -399,7 +412,7 @@ describe('preview create', () => {
 		]);
 	});
 
-	it('ignores blank auth-middleware values', () => {
+	it('ignores blank auth-middleware values', function () {
 		const result = rewriteComposeForPreview(
 			{
 				services: {
@@ -441,11 +454,11 @@ describe('preview create', () => {
 						repoOwner: 'wajeht',
 					},
 				),
-			/Could not find app service "api"/,
+			REGEX_MISSING_SERVICE,
 		);
 	});
 
-	it('keeps the app service and its dependencies only', () => {
+	it('keeps the app service and its dependencies only', function () {
 		const tempDir = fs.mkdtempSync(
 			path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
 		);
@@ -497,7 +510,7 @@ describe('preview create', () => {
 			);
 
 			execFileSync('node', [
-				scriptPath,
+				SCRIPT_PATH,
 				'--action',
 				'create',
 				'--app-path',
@@ -549,7 +562,7 @@ describe('preview create', () => {
 		}
 	});
 
-	it('passes auth-middleware through the CLI', () => {
+	it('passes auth-middleware through the CLI', function () {
 		const tempDir = fs.mkdtempSync(
 			path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
 		);
@@ -575,7 +588,7 @@ describe('preview create', () => {
 			);
 
 			execFileSync('node', [
-				scriptPath,
+				SCRIPT_PATH,
 				'--action',
 				'create',
 				'--app-path',
@@ -607,7 +620,7 @@ describe('preview create', () => {
 	});
 });
 
-const config = `x-docker-cd:
+const PREVIEW_CONFIG = `x-docker-cd:
   rolling_update: false
 services:
   tinyauth:
@@ -621,66 +634,88 @@ services:
       TINYAUTH_APPS_USERS_OAUTH_WHITELIST: \${TINYAUTH_USERS_ALLOW:?required}
       TZ: America/Chicago
 `;
-const options = {
+const PREVIEW_OPTIONS = {
 	appPath: 'apps/demo',
 	prNumber: '42',
 	hostname: 'pr-42-demo.example.com',
-	allowlist: adminAllow,
+	allowlist: ADMIN_ALLOW,
 };
-const app = (host = 'admin.example.com', middleware = 'tinyauth@file') => ({
-	services: {
-		demo: {
-			image: 'ghcr.io/test/demo:old',
-			labels: [
-				`traefik.http.routers.demo.rule=Host(\`${host}\`)`,
-				`traefik.http.routers.demo.middlewares=${middleware}`,
-			],
+function app(host = 'admin.example.com', middleware = 'tinyauth@file') {
+	return {
+		services: {
+			demo: {
+				image: 'ghcr.io/test/demo:old',
+				labels: [
+					`traefik.http.routers.demo.rule=Host(\`${host}\`)`,
+					`traefik.http.routers.demo.middlewares=${middleware}`,
+				],
+			},
 		},
-	},
-});
+	};
+}
 
-describe('preview access rules', () => {
-	it('registers exactly one OAuth rule and preserves all production text', () => {
-		const result = updateAccess(config, options);
+describe('preview access rules', function () {
+	it('registers exactly one OAuth rule and preserves all production text', function () {
+		const result = updateAccess(PREVIEW_CONFIG, PREVIEW_OPTIONS);
 		const env = parseAuthEnvironment(result);
-		const id = previewId(options.appPath, options.prNumber);
-		assert.equal(env[`TINYAUTH_APPS_${id}_CONFIG_DOMAIN`], options.hostname);
-		assert.equal(env[`TINYAUTH_APPS_${id}_OAUTH_WHITELIST`], adminAllow);
-		assert.equal(updateAccess(result, { ...options, allowlist: null }), config);
-		assert.equal(updateAccess(result, options), result);
+		const id = previewId(PREVIEW_OPTIONS.appPath, PREVIEW_OPTIONS.prNumber);
+		assert.equal(
+			env[`TINYAUTH_APPS_${id}_CONFIG_DOMAIN`],
+			PREVIEW_OPTIONS.hostname,
+		);
+		assert.equal(env[`TINYAUTH_APPS_${id}_OAUTH_WHITELIST`], ADMIN_ALLOW);
+		assert.equal(
+			updateAccess(result, { ...PREVIEW_OPTIONS, allowlist: null }),
+			PREVIEW_CONFIG,
+		);
+		assert.equal(updateAccess(result, PREVIEW_OPTIONS), result);
 		assert.ok(!result.includes('BASICAUTH'));
 	});
-	it('removes only the owned rule and rejects an unowned collision', () => {
+	it('removes only the owned rule and rejects an unowned collision', function () {
 		const other = {
-			...options,
+			...PREVIEW_OPTIONS,
 			prNumber: '43',
 			hostname: 'pr-43-demo.example.com',
 		};
-		const second = updateAccess(config, other);
-		const both = updateAccess(second, options);
-		assert.equal(updateAccess(both, { ...options, allowlist: null }), second);
-		const unowned = updateAccess(config, options).replace(
-			options.hostname,
+		const second = updateAccess(PREVIEW_CONFIG, other);
+		const both = updateAccess(second, PREVIEW_OPTIONS);
+		assert.equal(
+			updateAccess(both, { ...PREVIEW_OPTIONS, allowlist: null }),
+			second,
+		);
+		const unowned = updateAccess(PREVIEW_CONFIG, PREVIEW_OPTIONS).replace(
+			PREVIEW_OPTIONS.hostname,
 			'production.example.com',
 		);
-		assert.throws(() => updateAccess(unowned, options), /unowned/);
+		assert.throws(
+			() => updateAccess(unowned, PREVIEW_OPTIONS),
+			REGEX_UNOWNED_RULE,
+		);
 	});
-	it('inherits admin and users allowlists, including middleware chains and map labels', () => {
-		const env = parseAuthEnvironment(config);
+	it('inherits admin and users allowlists, including middleware chains and map labels', function () {
+		const env = parseAuthEnvironment(PREVIEW_CONFIG);
 		assert.equal(
 			resolveInheritedAllowlist(tinyauthRules(app().services), env),
-			adminAllow,
+			ADMIN_ALLOW,
 		);
 		const users = app(
 			'users.example.com',
 			'rate-limit@file,tinyauth-no-ratelimit@file',
 		);
-		users.services.demo.labels = Object.fromEntries(
-			users.services.demo.labels.map((label) => label.split('=')),
-		);
+		const labels = {};
+		for (const label of users.services.demo.labels) {
+			const [key, value] = label.split('=');
+			labels[key] = value;
+		}
+		const usersWithMapLabels = {
+			services: { demo: { ...users.services.demo, labels } },
+		};
 		assert.equal(
-			resolveInheritedAllowlist(tinyauthRules(users.services), env),
-			usersAllow,
+			resolveInheritedAllowlist(
+				tinyauthRules(usersWithMapLabels.services),
+				env,
+			),
+			USERS_ALLOW,
 		);
 		assert.equal(
 			resolveInheritedAllowlist(
@@ -695,7 +730,7 @@ describe('preview access rules', () => {
 					tinyauthRules(app('unknown.example.com').services),
 					env,
 				),
-			/Expected one/,
+			REGEX_MISSING_RULE,
 		);
 		assert.throws(
 			() =>
@@ -706,31 +741,37 @@ describe('preview access rules', () => {
 					}),
 					env,
 				),
-			/different/,
+			REGEX_DIFFERENT_ALLOWLISTS,
 		);
 	});
-	it('fails closed for default allow or rolling updates', () => {
+	it('fails closed for default allow or rolling updates', function () {
 		assert.throws(
-			() => parseAuthEnvironment(config.replace('POLICY: deny', 'POLICY: allow')),
-			/deny/,
+			() =>
+				parseAuthEnvironment(
+					PREVIEW_CONFIG.replace('POLICY: deny', 'POLICY: allow'),
+				),
+			REGEX_DEFAULT_DENY,
 		);
 		assert.throws(
 			() =>
 				parseAuthEnvironment(
-					config.replace('rolling_update: false', 'rolling_update: true'),
+					PREVIEW_CONFIG.replace(
+						'rolling_update: false',
+						'rolling_update: true',
+					),
 				),
-			/recreation/,
+			REGEX_RECREATION,
 		);
 	});
-	it('handles inherited auth, explicit admin, public transitions, and cleanup after a missing stack', async () => {
+	it('handles inherited auth, explicit admin, public transitions, and cleanup after a missing stack', async function () {
 		const cwd = process.cwd();
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-access-'));
 		try {
 			process.chdir(dir);
 			fs.mkdirSync('apps/tinyauth', { recursive: true });
 			fs.mkdirSync('apps/demo', { recursive: true });
-			fs.writeFileSync('apps/tinyauth/docker-compose.yml', config);
-			const run = async (doc, middleware = '') => {
+			fs.writeFileSync('apps/tinyauth/docker-compose.yml', PREVIEW_CONFIG);
+			async function deployPreview(doc, middleware = '') {
 				fs.writeFileSync('apps/demo/docker-compose.yml', yaml.dump(doc));
 				return main([
 					'--action',
@@ -748,24 +789,27 @@ describe('preview access rules', () => {
 					'--auth-middleware',
 					middleware,
 				]);
-			};
+			}
 			function readConfig() {
 				return fs.readFileSync('apps/tinyauth/docker-compose.yml', 'utf8');
 			}
 			const key = `TINYAUTH_APPS_${previewId('apps/demo', '42')}_OAUTH_WHITELIST`;
-			await run(app('users.example.com'));
-			assert.equal(parseAuthEnvironment(readConfig())[key], usersAllow);
-			await run(app('users.example.com'), 'tinyauth@file');
-			assert.equal(parseAuthEnvironment(readConfig())[key], adminAllow);
-			await run(app('users.example.com', 'rate-limit@file'));
-			assert.equal(readConfig(), config);
-			await run(app('users.example.com', 'rate-limit@file'), 'tinyauth@file');
+			await deployPreview(app('users.example.com'));
+			assert.equal(parseAuthEnvironment(readConfig())[key], USERS_ALLOW);
+			await deployPreview(app('users.example.com'), 'tinyauth@file');
+			assert.equal(parseAuthEnvironment(readConfig())[key], ADMIN_ALLOW);
+			await deployPreview(app('users.example.com', 'rate-limit@file'));
+			assert.equal(readConfig(), PREVIEW_CONFIG);
+			await deployPreview(
+				app('users.example.com', 'rate-limit@file'),
+				'tinyauth@file',
+			);
 			fs.rmSync('apps/demo-pr-42', { recursive: true });
 			await main([
 				'--action',
 				'cleanup',
 				'--app-path',
-				'apps/demo',
+				'apps/demo/.',
 				'--pr-number',
 				'42',
 			]);
@@ -777,9 +821,9 @@ describe('preview access rules', () => {
 				'--pr-number',
 				'42',
 			]);
-			assert.equal(readConfig(), config);
+			assert.equal(readConfig(), PREVIEW_CONFIG);
 			fs.rmSync('apps/tinyauth', { recursive: true });
-			await assert.rejects(() => run(app()), /missing/);
+			await assert.rejects(() => deployPreview(app()), REGEX_MISSING_AUTH);
 		} finally {
 			process.chdir(cwd);
 			fs.rmSync(dir, { recursive: true, force: true });
@@ -787,8 +831,8 @@ describe('preview access rules', () => {
 	});
 });
 
-describe('preview cleanup', () => {
-	it('removes the matching temp stack', async () => {
+describe('preview cleanup', function () {
+	it('removes the matching temp stack', async function () {
 		const dir = fs.mkdtempSync(
 			path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
 		);
@@ -803,11 +847,11 @@ describe('preview cleanup', () => {
 			);
 
 			execFileSync(process.execPath, [
-				scriptPath,
+				SCRIPT_PATH,
 				'--action',
 				'cleanup',
 				'--app-path',
-				appPath,
+				`${appPath}${path.sep}`,
 				'--pr-number',
 				'42',
 			]);
@@ -818,7 +862,7 @@ describe('preview cleanup', () => {
 		}
 	});
 
-	it('does nothing when the temp stack is already gone', async () => {
+	it('does nothing when the temp stack is already gone', async function () {
 		const dir = fs.mkdtempSync(
 			path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
 		);
@@ -841,12 +885,51 @@ describe('preview cleanup', () => {
 	});
 });
 
+describe('preview input boundaries', function () {
+	it('rejects unsafe deletion targets before touching files', async function () {
+		for (const prNumber of ['../42', '0', '-1']) {
+			await assert.rejects(
+				() =>
+					main([
+						'--action',
+						'cleanup',
+						'--app-path',
+						'apps/demo',
+						`--pr-number=${prNumber}`,
+					]),
+				REGEX_INVALID_PR_NUMBER,
+			);
+		}
+		await assert.rejects(
+			() =>
+				main(['--action', 'cleanup', '--app-path', '.', '--pr-number', '42']),
+			REGEX_INVALID_DIRECTORY,
+		);
+	});
+
+	it('keeps the production Compose input unchanged', function () {
+		const production = app();
+		production.services.demo.container_name = 'production';
+		production.services.demo.volumes = ['/home/jaw/data/demo:/data'];
+		const snapshot = structuredClone(production);
+		const preview = rewriteComposeForPreview(production, {
+			appName: 'demo',
+			serviceName: 'demo',
+			tag: 'new',
+			prNumber: '42',
+			repoOwner: 'test',
+		});
+		assert.deepStrictEqual(production, snapshot);
+		assert.notStrictEqual(preview.doc.services.demo, production.services.demo);
+	});
+});
+
 describe('preview CLI', () => {
-	it('validates the action and creation-only arguments', async () => {
-		await assert.rejects(() => main([]), /action must be create or cleanup/);
+	it('validates the action and creation-only arguments', async function () {
+		await assert.rejects(() => main([]), REGEX_INVALID_ACTION);
 		await assert.rejects(
 			() => main(['--action', 'invalid']),
-			/action must be create or cleanup/,
+			REGEX_INVALID_ACTION,
 		);
 		await assert.rejects(
 			() =>
@@ -858,11 +941,11 @@ describe('preview CLI', () => {
 					'--pr-number',
 					'42',
 				]),
-			/service-name/,
+			REGEX_REQUIRED_SERVICE,
 		);
 		await assert.rejects(
 			() => main(['--action', 'cleanup', '--app-path', 'apps/demo']),
-			/pr-number/,
+			REGEX_REQUIRED_PR,
 		);
 	});
 });

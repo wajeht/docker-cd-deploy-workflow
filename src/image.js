@@ -4,12 +4,17 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import yaml from 'js-yaml';
 
+const REGEX_META_CHARACTERS = /[.*+?^${}()|[\]\\]/g;
+const REGEX_SERVICES = /^(\s*)services:\s*(?:#.*)?$/;
+const REGEX_INDENT = /^(\s*)/;
+const REGEX_IMAGE = /^\s*image:\s*/;
+
 function isObject(value) {
-	return value !== null && typeof value === 'object' && !Array.isArray(value);
+	return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function escapedRegExp(value) {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	return value.replace(REGEX_META_CHARACTERS, '\\$&');
 }
 
 export function imageRepository(image) {
@@ -21,23 +26,30 @@ export function imageRepository(image) {
 
 function replaceServiceImageLine(content, serviceName, image) {
 	const lines = content.split('\n');
-	const servicesLine = lines.findIndex((line) => /^(\s*)services:\s*(?:#.*)?$/.test(line));
+	const servicesLine = lines.findIndex((line) => REGEX_SERVICES.test(line));
 	if (servicesLine === -1) {
 		throw new Error('docker-compose.yml must contain a services block');
 	}
 
-	const servicesIndent = lines[servicesLine].match(/^(\s*)/)?.[1].length ?? 0;
-	const servicePattern = new RegExp(`^(\\s*)${escapedRegExp(serviceName)}:\\s*(?:#.*)?$`);
+	const servicesIndent =
+		lines[servicesLine].match(REGEX_INDENT)?.[1].length ?? 0;
+	const REGEX_SERVICE = new RegExp(
+		`^(\\s*)${escapedRegExp(serviceName)}:\\s*(?:#.*)?$`,
+	);
 	let serviceLine = -1;
 	let serviceIndent = -1;
 
 	for (let i = servicesLine + 1; i < lines.length; i++) {
 		const line = lines[i];
-		if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
-		const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
-		if (indent <= servicesIndent) break;
+		if (line.trim() === '' || line.trimStart().startsWith('#')) {
+			continue;
+		}
+		const indent = line.match(REGEX_INDENT)?.[1].length ?? 0;
+		if (indent <= servicesIndent) {
+			break;
+		}
 
-		const match = line.match(servicePattern);
+		const match = line.match(REGEX_SERVICE);
 		if (match) {
 			serviceLine = i;
 			serviceIndent = match[1].length;
@@ -51,11 +63,15 @@ function replaceServiceImageLine(content, serviceName, image) {
 
 	for (let i = serviceLine + 1; i < lines.length; i++) {
 		const line = lines[i];
-		if (line.trim() === '') continue;
-		const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
-		if (indent <= serviceIndent) break;
-		if (/^\s*image:\s*/.test(line)) {
-			lines[i] = `${line.match(/^(\s*)/)?.[1] ?? ''}image: ${image}`;
+		if (line.trim() === '') {
+			continue;
+		}
+		const indent = line.match(REGEX_INDENT)?.[1].length ?? 0;
+		if (indent <= serviceIndent) {
+			break;
+		}
+		if (REGEX_IMAGE.test(line)) {
+			lines[i] = `${line.match(REGEX_INDENT)?.[1] ?? ''}image: ${image}`;
 			return lines.join('\n');
 		}
 	}
@@ -63,7 +79,10 @@ function replaceServiceImageLine(content, serviceName, image) {
 	throw new Error(`Service "${serviceName}" must define an image`);
 }
 
-export function updateComposeImageTag(content, { serviceName, repo, tag, digest }) {
+export function updateComposeImageTag(
+	content,
+	{ serviceName, repo, tag, digest },
+) {
 	const doc = yaml.load(content);
 	if (!isObject(doc) || !isObject(doc.services)) {
 		throw new Error('docker-compose.yml must contain a services block');
@@ -90,7 +109,12 @@ export function updateComposeImageTag(content, { serviceName, repo, tag, digest 
 
 	const nextImage = `${repoName}:${tag}@${digest}`;
 	if (service.image === nextImage) {
-		return { changed: false, content, image: service.image, reason: `already at ${nextImage}` };
+		return {
+			changed: false,
+			content,
+			image: service.image,
+			reason: `already at ${nextImage}`,
+		};
 	}
 
 	return {
@@ -113,12 +137,25 @@ export async function main(argv = process.argv.slice(2)) {
 		},
 	});
 	for (const key of ['app-path', 'service-name', 'tag', 'repo', 'digest']) {
-		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
+		if (!args[key]) {
+			throw new Error(`Missing required arg: --${key}`);
+		}
 	}
-	const { 'app-path': appPath, 'service-name': serviceName, tag, repo, digest } = args;
+	const {
+		'app-path': appPath,
+		'service-name': serviceName,
+		tag,
+		repo,
+		digest,
+	} = args;
 	const composePath = path.join(appPath, 'docker-compose.yml');
 	const content = fs.readFileSync(composePath, 'utf8');
-	const result = updateComposeImageTag(content, { serviceName, repo, tag, digest });
+	const result = updateComposeImageTag(content, {
+		serviceName,
+		repo,
+		tag,
+		digest,
+	});
 
 	if (!result.changed) {
 		console.log(`No changes - ${result.reason}`);
@@ -129,8 +166,11 @@ export async function main(argv = process.argv.slice(2)) {
 	console.log(`Updated ${serviceName} to ${result.image} in ${composePath}`);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-	main().catch((err) => {
+if (
+	process.argv[1] &&
+	fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+) {
+	main().catch(function (err) {
 		console.error(err.message);
 		process.exit(1);
 	});

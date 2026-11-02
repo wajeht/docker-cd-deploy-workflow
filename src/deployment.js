@@ -3,7 +3,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { authPath, previewId, isTinyauthPreview } from './preview.js';
+import { AUTH_PATH, previewId, isTinyauthPreview } from './preview.js';
+
+const REGEX_COMMIT_SHA = /^[a-f0-9]{40}$/;
+const REGEX_PREVIEW_NAME = /^(.+)-pr-([0-9]+)$/;
+
+const DEPLOYMENT_ACTIONS = Object.freeze({
+	request: requestDeployment,
+	deploy: markDeploymentSuccess,
+	cleanup: cleanupDeployments,
+});
 
 function createGitHubApi(token, repo) {
 	const apiBase = `https://api.github.com/repos/${repo}`;
@@ -17,7 +26,9 @@ function createGitHubApi(token, repo) {
 	return async function requestGitHub(path, options = {}) {
 		const res = await fetch(`${apiBase}${path}`, { headers, ...options });
 		if (!res.ok) {
-			throw new Error(`GitHub API ${options.method || 'GET'} ${path}: ${res.status} ${await res.text()}`);
+			throw new Error(
+				`GitHub API ${options.method ?? 'GET'} ${path}: ${res.status}`,
+			);
 		}
 		return res;
 	};
@@ -25,7 +36,7 @@ function createGitHubApi(token, repo) {
 
 async function requestDeployment(githubApi, args) {
 	const environment = args['environment'];
-	const ref = args['ref'] || 'main';
+	const ref = args['ref'] ?? 'main';
 	const production = args['production'] === 'true';
 	const res = await githubApi('/deployments', {
 		method: 'POST',
@@ -63,13 +74,8 @@ function runGit(args) {
 	}).trim();
 }
 
-export function isDeploymentCurrent(
-	expected,
-	actual,
-	tempPath,
-	auth = false,
-) {
-	if (!/^[a-f0-9]{40}$/.test(actual || '')) {
+export function isDeploymentCurrent(expected, actual, tempPath, auth = false) {
+	if (!REGEX_COMMIT_SHA.test(actual ?? '')) {
 		return false;
 	}
 	try {
@@ -84,10 +90,10 @@ export function isDeploymentCurrent(
 				runGit(['diff', '--name-only', expected, actual, '--', tempPath]) === ''
 			);
 		}
-		const [, app, pr] = path.basename(tempPath).match(/^(.+)-pr-([0-9]+)$/);
+		const [, app, pr] = path.basename(tempPath).match(REGEX_PREVIEW_NAME);
 		const ownKey = `TINYAUTH_APPS_${previewId(app, pr)}_`;
 		function readTinyauthSettings(ref) {
-			return runGit(['show', `${ref}:${authPath}`])
+			return runGit(['show', `${ref}:${AUTH_PATH}`])
 				.split('\n')
 				.filter((line) => {
 					return (
@@ -106,10 +112,7 @@ export function isDeploymentCurrent(
 
 export async function waitForTinyauth(
 	tempPath,
-	{
-		attempts = 60,
-		matches = isDeploymentCurrent,
-	} = {},
+	{ attempts = 60, matches = isDeploymentCurrent } = {},
 ) {
 	const apiUrl = process.env.DOCKER_CD_URL;
 	const token = process.env.DOCKER_CD_API_SECRET;
@@ -135,31 +138,44 @@ export async function waitForTinyauth(
 				},
 			);
 			if (response.status === 401 || response.status === 403) {
-				throw new Error('docker-cd API authentication failed');
+				throw new Error('docker-cd API authentication failed', {
+					cause: { status: response.status },
+				});
 			}
 			if (!response.ok) {
 				return false;
 			}
 			const { success, data } = await response.json();
 			const health = data?.health;
-			return (
-				success &&
-				data?.sync === 'synced' &&
-				data.lastDeploy?.status === 'synced' &&
-				health?.total > 0 &&
-				health.running === health.total &&
-				health.starting === 0 &&
-				health.unhealthy === 0 &&
-				(project !== 'tinyauth' || health.healthy === health.total) &&
-				matches(
-					expected,
-					data.lastDeploy.commitSHA,
-					tempPath,
-					project === 'tinyauth',
-				)
+			if (
+				!success ||
+				data?.sync !== 'synced' ||
+				data.lastDeploy?.status !== 'synced'
+			) {
+				return false;
+			}
+			if (
+				!(health?.total > 0) ||
+				health.running !== health.total ||
+				health.starting !== 0 ||
+				health.unhealthy !== 0
+			) {
+				return false;
+			}
+			if (project === 'tinyauth' && health.healthy !== health.total) {
+				return false;
+			}
+			return matches(
+				expected,
+				data.lastDeploy.commitSHA,
+				tempPath,
+				project === 'tinyauth',
 			);
 		} catch (error) {
-			if (error.message === 'docker-cd API authentication failed') {
+			if (
+				error instanceof Error &&
+				(error.cause?.status === 401 || error.cause?.status === 403)
+			) {
 				throw error;
 			}
 			return false;
@@ -257,7 +273,9 @@ async function markDeploymentSuccess(githubApi, args) {
 
 async function cleanupDeployments(githubApi, args) {
 	const environment = args['environment'];
-	const res = await githubApi(`/deployments?environment=${encodeURIComponent(environment)}&per_page=100`);
+	const res = await githubApi(
+		`/deployments?environment=${encodeURIComponent(environment)}&per_page=100`,
+	);
 	const deployments = await res.json();
 
 	for (const deployment of deployments) {
@@ -274,7 +292,9 @@ async function cleanupDeployments(githubApi, args) {
 		});
 	}
 
-	console.log(`Cleaned up ${deployments.length} deployment(s) for ${environment}`);
+	console.log(
+		`Cleaned up ${deployments.length} deployment(s) for ${environment}`,
+	);
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -294,24 +314,24 @@ export async function main(argv = process.argv.slice(2)) {
 		},
 	});
 	for (const key of ['token', 'repo', 'action', 'environment']) {
-		if (!args[key]) throw new Error(`Missing required arg: --${key}`);
+		if (!args[key]) {
+			throw new Error(`Missing required arg: --${key}`);
+		}
 	}
 	const action = args['action'];
 	const githubApi = createGitHubApi(args['token'], args['repo']);
 
-	if (action === 'request') {
-		await requestDeployment(githubApi, args);
-	} else if (action === 'deploy') {
-		await markDeploymentSuccess(githubApi, args);
-	} else if (action === 'cleanup') {
-		await cleanupDeployments(githubApi, args);
-	} else {
+	if (!Object.hasOwn(DEPLOYMENT_ACTIONS, action)) {
 		throw new Error(`Unknown action: ${action}`);
 	}
+	await DEPLOYMENT_ACTIONS[action](githubApi, args);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-	main().catch((err) => {
+if (
+	process.argv[1] &&
+	fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+) {
+	main().catch(function (err) {
 		console.error(err.message);
 		process.exit(1);
 	});

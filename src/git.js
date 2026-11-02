@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
+const REGEX_MISSING_PATH = /did not match any files/;
+
 export async function main(argv = process.argv.slice(2)) {
 	const { values: args } = parseArgs({
 		args: argv,
@@ -45,7 +47,7 @@ export async function main(argv = process.argv.slice(2)) {
 				});
 			} catch (error) {
 				// A missing path is normal after cleanup; do not hide other staging failures.
-				if (!/did not match any files/.test(String(error.stderr))) {
+				if (!REGEX_MISSING_PATH.test(String(error.stderr))) {
 					throw error;
 				}
 			}
@@ -56,8 +58,10 @@ export async function main(argv = process.argv.slice(2)) {
 		execFileSync('git', ['diff', '--staged', '--quiet']);
 		console.log('No changes to commit');
 		return;
-	} catch {
-		// has staged changes, continue
+	} catch (error) {
+		if (error.status !== 1) {
+			throw error;
+		}
 	}
 
 	runCommand('git', ['commit', '-m', message]);
@@ -82,8 +86,11 @@ export async function main(argv = process.argv.slice(2)) {
 	}
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-	main().catch((err) => {
+if (
+	process.argv[1] &&
+	fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+) {
+	main().catch(function (err) {
 		console.error(err.message);
 		process.exit(1);
 	});

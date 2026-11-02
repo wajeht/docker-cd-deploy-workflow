@@ -5,7 +5,24 @@ import { parseArgs } from 'node:util';
 import yaml from 'js-yaml';
 import { createHash } from 'node:crypto';
 
-export const authPath = 'apps/tinyauth/docker-compose.yml';
+const REGEX_TINYAUTH_SERVICE = /^  tinyauth:\n(?:(?: {4}.*|\s*)\n)*/m;
+const REGEX_ROUTER_MIDDLEWARES =
+	/^traefik\.http\.routers\.([^.]+)\.middlewares=(.*)$/;
+const REGEX_HOST = /Host\(`([^`]+)`\)/g;
+const REGEX_VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+const REGEX_ROUTER = /^traefik\.http\.routers\.([^.]+)\./;
+const REGEX_SERVICE = /^traefik\.http\.services\.([^.]+)\./;
+const REGEX_PR_NUMBER = /^[1-9][0-9]*$/;
+const REGEX_APP_NAME = /^[a-z0-9][a-z0-9.-]*$/;
+
+const AUTH_MIDDLEWARES = Object.freeze({
+	'tinyauth@file': true,
+	'tinyauth-no-ratelimit@file': true,
+});
+
+export const AUTH_PATH = 'apps/tinyauth/docker-compose.yml';
+export const ADMIN_ALLOW = '${TINYAUTH_ADMIN_ALLOW:?required}';
+export const USERS_ALLOW = '${TINYAUTH_USERS_ALLOW:?required}';
 
 export function previewId(appPath, prNumber) {
 	const input = `${path.basename(appPath)}:${prNumber}`;
@@ -22,7 +39,10 @@ export function updateAccess(text, { appPath, prNumber, hostname, allowlist }) {
 	const domain = lines.find((line) => line.startsWith(domainKey));
 	const hasRule = lines.some((line) => line.startsWith(allowKey));
 	const previewHost = `pr-${prNumber}-${path.basename(appPath)}.`;
-	if ((domain || hasRule) && !domain?.startsWith(domainKey + previewHost)) {
+	if (
+		(domain || hasRule) &&
+		!domain?.startsWith(`${domainKey}${previewHost}`)
+	) {
 		throw new Error('Refusing to modify an unowned Tinyauth rule');
 	}
 	const updated = lines
@@ -37,7 +57,7 @@ export function updateAccess(text, { appPath, prNumber, hostname, allowlist }) {
 	if (text.includes(rule)) {
 		return text;
 	}
-	const service = updated.match(/^  tinyauth:\n(?:(?: {4}.*|\s*)\n)*/m)?.[0];
+	const service = updated.match(REGEX_TINYAUTH_SERVICE)?.[0];
 	if (!service?.includes('    environment:\n')) {
 		throw new Error('Unsupported Tinyauth Compose layout');
 	}
@@ -47,13 +67,31 @@ export function updateAccess(text, { appPath, prNumber, hostname, allowlist }) {
 	);
 }
 
+function validatePreviewTarget(appPath, prNumber) {
+	if (typeof appPath !== 'string' || appPath.trim() === '') {
+		throw new Error('app-path must be an app directory');
+	}
+	const directory = path.resolve(appPath);
+	if (
+		path.basename(path.dirname(directory)) !== 'apps' ||
+		!REGEX_APP_NAME.test(path.basename(directory))
+	) {
+		throw new Error('app-path must name a directory directly under apps/');
+	}
+	if (!REGEX_PR_NUMBER.test(prNumber ?? '')) {
+		throw new Error('pr-number must be a positive integer');
+	}
+	return directory;
+}
+
 export function removePreview(appPath, prNumber) {
-	const tempPath = `${appPath}-pr-${prNumber}`;
-	if (fs.existsSync(authPath)) {
-		const text = fs.readFileSync(authPath, 'utf8');
+	const directory = validatePreviewTarget(appPath, prNumber);
+	const tempPath = `${directory}-pr-${prNumber}`;
+	if (fs.existsSync(AUTH_PATH)) {
+		const text = fs.readFileSync(AUTH_PATH, 'utf8');
 		fs.writeFileSync(
-			authPath,
-			updateAccess(text, { appPath, prNumber, allowlist: null }),
+			AUTH_PATH,
+			updateAccess(text, { appPath: directory, prNumber, allowlist: null }),
 		);
 	}
 
@@ -66,41 +104,39 @@ export function removePreview(appPath, prNumber) {
 	console.log(`Removed temp stack at ${tempPath}`);
 }
 
-export const adminAllow = '${TINYAUTH_ADMIN_ALLOW:?required}';
-export const usersAllow = '${TINYAUTH_USERS_ALLOW:?required}';
-
 export function serviceLabels(service) {
 	if (Array.isArray(service.labels)) {
-		return service.labels;
+		return [...service.labels];
 	}
-	return Object.entries(service.labels || {}).map(
-		([key, value]) => `${key}=${value}`,
-	);
+	const labels = [];
+	for (const [key, value] of Object.entries(service.labels ?? {})) {
+		labels.push(`${key}=${value}`);
+	}
+	return labels;
 }
 
 export function hasTinyauth(middlewares = '') {
-	return middlewares
-		.split(',')
-		.some((value) =>
-			['tinyauth@file', 'tinyauth-no-ratelimit@file'].includes(value.trim()),
-		);
+	for (const middleware of middlewares.split(',')) {
+		if (Object.hasOwn(AUTH_MIDDLEWARES, middleware.trim())) {
+			return true;
+		}
+	}
+	return false;
 }
 
 export function tinyauthRules(services) {
 	const rules = [];
-	for (const service of Object.values(services || {})) {
+	for (const service of Object.values(services ?? {})) {
 		const labels = serviceLabels(service).filter(
 			(label) => !label.includes('redirect'),
 		);
 		for (const label of labels) {
-			const router = label.match(
-				/^traefik\.http\.routers\.([^.]+)\.middlewares=(.*)$/,
-			);
+			const router = label.match(REGEX_ROUTER_MIDDLEWARES);
 			if (router && hasTinyauth(router[2])) {
 				rules.push(
 					labels.find((value) =>
 						value.startsWith(`traefik.http.routers.${router[1]}.rule=`),
-					) || '',
+					) ?? '',
 				);
 			}
 		}
@@ -136,7 +172,7 @@ export function parseAuthEnvironment(text) {
 export function resolveInheritedAllowlist(rules, env) {
 	const allowlists = new Set();
 	for (const rule of rules) {
-		const routerHosts = [...rule.matchAll(/Host\(`([^`]+)`\)/g)];
+		const routerHosts = [...rule.matchAll(REGEX_HOST)];
 		if (!routerHosts.length) {
 			throw new Error('Protected router has no exact Host rule');
 		}
@@ -149,7 +185,7 @@ export function resolveInheritedAllowlist(rules, env) {
 			}
 			const allowlist =
 				env[keys[0].replace('CONFIG_DOMAIN', 'OAUTH_WHITELIST')];
-			if (![adminAllow, usersAllow].includes(allowlist)) {
+			if (![ADMIN_ALLOW, USERS_ALLOW].includes(allowlist)) {
 				throw new Error(`Unsupported Tinyauth allowlist for ${host}`);
 			}
 			allowlists.add(allowlist);
@@ -158,7 +194,7 @@ export function resolveInheritedAllowlist(rules, env) {
 	if (allowlists.size > 1) {
 		throw new Error('Preview routers have different Tinyauth allowlists');
 	}
-	return [...allowlists][0] || null;
+	return [...allowlists][0] ?? null;
 }
 
 export function syncAccess(options, rules = []) {
@@ -167,17 +203,17 @@ export function syncAccess(options, rules = []) {
 	if (middleware) {
 		protectedServices = hasTinyauth(middleware);
 	}
-	if (!fs.existsSync(authPath)) {
+	if (!fs.existsSync(AUTH_PATH)) {
 		if (protectedServices) {
 			throw new Error('Tinyauth Compose configuration is missing');
 		}
 		return;
 	}
-	const text = fs.readFileSync(authPath, 'utf8');
+	const text = fs.readFileSync(AUTH_PATH, 'utf8');
 	const env = parseAuthEnvironment(text);
 	let allowlist = null;
 	if (protectedServices && middleware) {
-		allowlist = adminAllow;
+		allowlist = ADMIN_ALLOW;
 	} else if (protectedServices) {
 		allowlist = resolveInheritedAllowlist(rules, env);
 	}
@@ -193,16 +229,20 @@ export function syncAccess(options, rules = []) {
 	) {
 		throw new Error('Preview hostname already belongs to another rule');
 	}
-	fs.writeFileSync(authPath, updateAccess(text, { ...options, allowlist }));
+	fs.writeFileSync(AUTH_PATH, updateAccess(text, { ...options, allowlist }));
 }
 
 export function hosts(services) {
 	const allHosts = [];
 	for (const [, service] of Object.entries(services)) {
-		if (!service.labels) continue;
+		if (!service.labels) {
+			continue;
+		}
 		for (const label of serviceLabels(service)) {
-			for (const match of label.matchAll(/Host\(`([^`]+)`\)/g)) {
-				if (!allHosts.includes(match[1])) allHosts.push(match[1]);
+			for (const match of label.matchAll(REGEX_HOST)) {
+				if (!allHosts.includes(match[1])) {
+					allHosts.push(match[1]);
+				}
 			}
 		}
 	}
@@ -212,9 +252,9 @@ export function hosts(services) {
 export function primaryHost(services) {
 	const allHosts = hosts(services);
 	return (
-		allHosts.find((h) => h.split('.').length >= 3 && !h.startsWith('www.')) ||
-		allHosts.find((h) => h.split('.').length >= 3) ||
-		allHosts[0] ||
+		allHosts.find((h) => h.split('.').length >= 3 && !h.startsWith('www.')) ??
+		allHosts.find((h) => h.split('.').length >= 3) ??
+		allHosts[0] ??
 		null
 	);
 }
@@ -224,7 +264,7 @@ export function serviceDependencies(service) {
 	if (Array.isArray(dependsOn)) {
 		return dependsOn.filter((name) => typeof name === 'string');
 	}
-	if (dependsOn && typeof dependsOn === 'object') {
+	if (dependsOn != null && typeof dependsOn === 'object') {
 		return Object.keys(dependsOn);
 	}
 	return [];
@@ -267,14 +307,16 @@ function namedVolumeFromString(volume) {
 	if (!source || path.isAbsolute(source) || source.startsWith('.')) {
 		return null;
 	}
-	if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(source)) {
+	if (!REGEX_VOLUME_NAME.test(source)) {
 		return null;
 	}
 	return source;
 }
 
 function pruneNetworks(doc, messages) {
-	if (!doc.networks) return;
+	if (!doc.networks) {
+		return;
+	}
 
 	const usedNetworks = new Set();
 	for (const service of Object.values(doc.services)) {
@@ -296,7 +338,9 @@ function pruneNetworks(doc, messages) {
 }
 
 function pruneVolumes(doc, volumeNames, messages) {
-	if (!doc.volumes) return;
+	if (!doc.volumes) {
+		return;
+	}
 
 	for (const volumeName of Object.keys(doc.volumes)) {
 		if (!volumeNames.has(volumeName)) {
@@ -312,23 +356,28 @@ function pruneVolumes(doc, volumeNames, messages) {
 
 function routerMiddlewareLabels(labels, authMiddleware) {
 	const middleware = authMiddleware?.trim();
-	if (!middleware) return labels;
+	if (!middleware) {
+		return labels;
+	}
 
 	const routerNames = new Set();
 	const routersWithMiddleware = new Set();
 
-	const rewritten = labels.map((label) => {
-		const router = label.match(/^traefik\.http\.routers\.([^.]+)\./)?.[1];
-		if (!router) return label;
-
+	const rewritten = [];
+	for (const label of labels) {
+		const router = label.match(REGEX_ROUTER)?.[1];
+		if (!router) {
+			rewritten.push(label);
+			continue;
+		}
 		routerNames.add(router);
 		if (!label.startsWith(`traefik.http.routers.${router}.middlewares=`)) {
-			return label;
+			rewritten.push(label);
+			continue;
 		}
-
 		routersWithMiddleware.add(router);
-		return `traefik.http.routers.${router}.middlewares=${middleware}`;
-	});
+		rewritten.push(`traefik.http.routers.${router}.middlewares=${middleware}`);
+	}
 
 	for (const router of routerNames) {
 		if (!routersWithMiddleware.has(router)) {
@@ -343,27 +392,37 @@ function routerMiddlewareLabels(labels, authMiddleware) {
 
 function tempTraefikName(name, serviceName, prNumber) {
 	const tempName = `${serviceName}-pr-${prNumber}`;
-	if (name === serviceName) return tempName;
-	if (name.startsWith(`${serviceName}-`))
+	if (name === serviceName) {
+		return tempName;
+	}
+	if (name.startsWith(`${serviceName}-`)) {
 		return `${tempName}${name.slice(serviceName.length)}`;
+	}
 	return `${name}-pr-${prNumber}`;
 }
 
 function previewTraefikLabel(label, serviceName, prNumber) {
 	return label
 		.replace(
-			/^traefik\.http\.routers\.([^.]+)\./,
+			REGEX_ROUTER,
 			(_, name) =>
 				`traefik.http.routers.${tempTraefikName(name, serviceName, prNumber)}.`,
 		)
 		.replace(
-			/^traefik\.http\.services\.([^.]+)\./,
+			REGEX_SERVICE,
 			(_, name) =>
 				`traefik.http.services.${tempTraefikName(name, serviceName, prNumber)}.`,
 		);
 }
 
 export function rewriteComposeForPreview(doc, options) {
+	if (
+		doc?.services == null ||
+		typeof doc.services !== 'object' ||
+		Array.isArray(doc.services)
+	) {
+		throw new Error('Compose must define a services mapping');
+	}
 	const { appName, serviceName, tag, prNumber, repoOwner, authMiddleware } =
 		options;
 	const rewritten = structuredClone(doc);
@@ -402,39 +461,46 @@ export function rewriteComposeForPreview(doc, options) {
 		}
 
 		if (service.labels) {
-			const labels = serviceLabels(service)
-				.filter((label) => !label.includes('redirect'))
-				.map((label) =>
+			const labels = [];
+			for (const label of serviceLabels(service)) {
+				if (label.includes('redirect')) {
+					continue;
+				}
+				labels.push(
 					previewTraefikLabel(label, serviceName, prNumber).replace(
-						/Host\(`[^`]+`\)/g,
+						REGEX_HOST,
 						`Host(\`${hostname}\`)`,
 					),
 				);
+			}
 			service.labels = routerMiddlewareLabels(labels, authMiddleware);
 		}
 
 		if (service.volumes) {
-			service.volumes = service.volumes.map((vol) => {
-				if (typeof vol !== 'string') {
-					if (vol?.type === 'volume' && typeof vol.source === 'string') {
-						volumeNames.add(vol.source);
+			const volumes = [];
+			for (const volume of service.volumes) {
+				if (typeof volume !== 'string') {
+					if (volume?.type === 'volume' && typeof volume.source === 'string') {
+						volumeNames.add(volume.source);
 					}
-					return vol;
+					volumes.push(volume);
+					continue;
 				}
-
-				const [hostPath, ...rest] = vol.split(':');
-				const containerPath = rest.join(':');
-
+				const [hostPath, ...rest] = volume.split(':');
 				if (!path.isAbsolute(hostPath)) {
-					const volumeName = namedVolumeFromString(vol);
-					if (volumeName) volumeNames.add(volumeName);
-					return vol;
+					const volumeName = namedVolumeFromString(volume);
+					if (volumeName) {
+						volumeNames.add(volumeName);
+					}
+					volumes.push(volume);
+					continue;
 				}
-
-				const volName = hostPath.split('/').filter(Boolean).pop() || 'data';
-				volumeNames.add(volName);
-				return `${volName}:${containerPath}`;
-			});
+				const basename = path.basename(hostPath);
+				const volumeName = basename === '' ? 'data' : basename;
+				volumeNames.add(volumeName);
+				volumes.push(`${volumeName}:${rest.join(':')}`);
+			}
+			service.volumes = volumes;
 		}
 	}
 
@@ -442,7 +508,7 @@ export function rewriteComposeForPreview(doc, options) {
 	pruneVolumes(rewritten, volumeNames, messages);
 
 	if (volumeNames.size > 0) {
-		rewritten.volumes = rewritten.volumes || {};
+		rewritten.volumes = rewritten.volumes ?? {};
 		for (const name of volumeNames) {
 			rewritten.volumes[name] = null;
 		}
@@ -489,7 +555,7 @@ export async function main(argv = process.argv.slice(2)) {
 		}
 	}
 	const appRepoPath = args['app-repo-path'];
-	const appPath = args['app-path'];
+	const appPath = validatePreviewTarget(args['app-path'], args['pr-number']);
 	const serviceName = args['service-name'];
 	const tag = args['tag'];
 	const prNumber = args['pr-number'];
@@ -559,7 +625,7 @@ if (
 	process.argv[1] &&
 	fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
 ) {
-	main().catch((err) => {
+	main().catch(function (err) {
 		console.error(err.message);
 		process.exit(1);
 	});
