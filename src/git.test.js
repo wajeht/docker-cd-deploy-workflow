@@ -11,9 +11,9 @@ import {
 	authPath,
 	previewId,
 	adminAllow,
-	authEnvironment,
+	parseAuthEnvironment,
 } from './preview.js';
-import { deployedRevisionMatches } from './deployment.js';
+import { isDeploymentCurrent } from './deployment.js';
 
 const scriptPath = path.join(
 	path.dirname(fileURLToPath(import.meta.url)),
@@ -168,12 +168,13 @@ describe('git', () => {
 	it('fails safely on a concurrent ACL conflict and preserves both rules after rerun', async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-conflict-'));
 		const cwd = process.cwd();
-		const git = (where, ...args) =>
-			execFileSync('git', args, {
-				cwd: where,
+		function runGit(directory, ...args) {
+			return execFileSync('git', args, {
+				cwd: directory,
 				encoding: 'utf8',
 				stdio: 'pipe',
 			}).trim();
+		}
 		const first = path.join(dir, 'first');
 		const second = path.join(dir, 'second');
 		const config =
@@ -184,49 +185,50 @@ describe('git', () => {
 			hostname: `pr-${pr}-demo.example.com`,
 			allowlist: adminAllow,
 		});
-		const push = () =>
-			execFileSync(
+		function pushPreview() {
+			return execFileSync(
 				process.execPath,
 				[scriptPath, '--paths', authPath, '--message', 'preview'],
 				{ cwd: first, stdio: 'pipe' },
 			);
+		}
 		try {
-			git(dir, 'init', '--bare', '--initial-branch=main', 'remote.git');
-			git(dir, 'clone', path.join(dir, 'remote.git'), first);
-			git(first, 'config', 'user.name', 'Test');
-			git(first, 'config', 'user.email', 'test@example.com');
+			runGit(dir, 'init', '--bare', '--initial-branch=main', 'remote.git');
+			runGit(dir, 'clone', path.join(dir, 'remote.git'), first);
+			runGit(first, 'config', 'user.name', 'Test');
+			runGit(first, 'config', 'user.email', 'test@example.com');
 			fs.mkdirSync(path.join(first, 'apps/tinyauth'), { recursive: true });
 			fs.writeFileSync(path.join(first, authPath), config);
-			git(first, 'add', '.');
-			git(first, 'commit', '-m', 'initial');
-			git(first, 'push', 'origin', 'main');
-			git(dir, 'clone', path.join(dir, 'remote.git'), second);
-			git(second, 'config', 'user.name', 'Test');
-			git(second, 'config', 'user.email', 'test@example.com');
+			runGit(first, 'add', '.');
+			runGit(first, 'commit', '-m', 'initial');
+			runGit(first, 'push', 'origin', 'main');
+			runGit(dir, 'clone', path.join(dir, 'remote.git'), second);
+			runGit(second, 'config', 'user.name', 'Test');
+			runGit(second, 'config', 'user.email', 'test@example.com');
 			const other = updateAccess(config, rule('43'));
 			fs.writeFileSync(path.join(second, authPath), other);
-			git(second, 'add', '.');
-			git(second, 'commit', '-m', 'preview 43');
-			git(second, 'push', 'origin', 'main');
+			runGit(second, 'add', '.');
+			runGit(second, 'commit', '-m', 'preview 43');
+			runGit(second, 'push', 'origin', 'main');
 			fs.writeFileSync(
 				path.join(first, authPath),
 				updateAccess(config, rule('42')),
 			);
-			assert.throws(push, /Concurrent changes conflict/);
+			assert.throws(pushPreview, /Concurrent changes conflict/);
 			assert.strictEqual(
-				git(first, 'show', `origin/main:${authPath}`),
+				runGit(first, 'show', `origin/main:${authPath}`),
 				other.trim(),
 			);
-			git(first, 'rebase', '--abort');
-			git(first, 'reset', '--hard', 'origin/main');
-			const previous = git(first, 'rev-parse', 'HEAD');
+			runGit(first, 'rebase', '--abort');
+			runGit(first, 'reset', '--hard', 'origin/main');
+			const previous = runGit(first, 'rev-parse', 'HEAD');
 			fs.writeFileSync(
 				path.join(first, authPath),
 				updateAccess(other, rule('42')),
 			);
-			push();
-			const current = git(first, 'rev-parse', 'HEAD');
-			const env = authEnvironment(git(first, 'show', `HEAD:${authPath}`));
+			pushPreview();
+			const current = runGit(first, 'rev-parse', 'HEAD');
+			const env = parseAuthEnvironment(runGit(first, 'show', `HEAD:${authPath}`));
 			for (const pr of ['42', '43']) {
 				assert.strictEqual(
 					env[`TINYAUTH_APPS_${previewId('apps/demo', pr)}_OAUTH_WHITELIST`],
@@ -235,24 +237,24 @@ describe('git', () => {
 			}
 			process.chdir(first);
 			assert.strictEqual(
-				deployedRevisionMatches(previous, current, 'apps/demo-pr-43', true),
+				isDeploymentCurrent(previous, current, 'apps/demo-pr-43', true),
 				true,
 			);
 			assert.strictEqual(
-				deployedRevisionMatches(previous, current, 'apps/demo-pr-42', true),
+				isDeploymentCurrent(previous, current, 'apps/demo-pr-42', true),
 				false,
 			);
 			assert.strictEqual(
-				deployedRevisionMatches(current, previous, 'apps/demo-pr-42', true),
+				isDeploymentCurrent(current, previous, 'apps/demo-pr-42', true),
 				false,
 			);
 			fs.appendFileSync(authPath, '# changed global auth configuration\n');
-			git(first, 'add', authPath);
-			git(first, 'commit', '-m', 'change auth configuration');
+			runGit(first, 'add', authPath);
+			runGit(first, 'commit', '-m', 'change auth configuration');
 			assert.strictEqual(
-				deployedRevisionMatches(
+				isDeploymentCurrent(
 					current,
-					git(first, 'rev-parse', 'HEAD'),
+					runGit(first, 'rev-parse', 'HEAD'),
 					'apps/demo-pr-42',
 					true,
 				),

@@ -69,7 +69,7 @@ export function removePreview(appPath, prNumber) {
 export const adminAllow = '${TINYAUTH_ADMIN_ALLOW:?required}';
 export const usersAllow = '${TINYAUTH_USERS_ALLOW:?required}';
 
-export function labelsOf(service) {
+export function serviceLabels(service) {
 	if (Array.isArray(service.labels)) {
 		return service.labels;
 	}
@@ -89,7 +89,7 @@ export function hasTinyauth(middlewares = '') {
 export function tinyauthRules(services) {
 	const rules = [];
 	for (const service of Object.values(services || {})) {
-		const labels = labelsOf(service).filter(
+		const labels = serviceLabels(service).filter(
 			(label) => !label.includes('redirect'),
 		);
 		for (const label of labels) {
@@ -115,7 +115,7 @@ export function isTinyauthPreview(tempPath) {
 	return tinyauthRules(doc.services).length > 0;
 }
 
-export function authEnvironment(text) {
+export function parseAuthEnvironment(text) {
 	const doc = yaml.load(text);
 	const env = doc?.services?.tinyauth?.environment;
 	if (!env || Array.isArray(env) || typeof env !== 'object') {
@@ -133,14 +133,14 @@ export function authEnvironment(text) {
 }
 
 // One preview hostname cannot represent two different access policies safely.
-export function inheritedAllowlist(rules, env) {
+export function resolveInheritedAllowlist(rules, env) {
 	const allowlists = new Set();
 	for (const rule of rules) {
-		const hosts = [...rule.matchAll(/Host\(`([^`]+)`\)/g)];
-		if (!hosts.length) {
+		const routerHosts = [...rule.matchAll(/Host\(`([^`]+)`\)/g)];
+		if (!routerHosts.length) {
 			throw new Error('Protected router has no exact Host rule');
 		}
-		for (const [, host] of hosts) {
+		for (const [, host] of routerHosts) {
 			const keys = Object.keys(env).filter((key) => {
 				return key.endsWith('_CONFIG_DOMAIN') && env[key] === host;
 			});
@@ -174,12 +174,12 @@ export function syncAccess(options, rules = []) {
 		return;
 	}
 	const text = fs.readFileSync(authPath, 'utf8');
-	const env = authEnvironment(text);
+	const env = parseAuthEnvironment(text);
 	let allowlist = null;
 	if (protectedServices && middleware) {
 		allowlist = adminAllow;
 	} else if (protectedServices) {
-		allowlist = inheritedAllowlist(rules, env);
+		allowlist = resolveInheritedAllowlist(rules, env);
 	}
 	const prefix = `TINYAUTH_APPS_${previewId(options.appPath, options.prNumber)}_`;
 	if (
@@ -196,11 +196,11 @@ export function syncAccess(options, rules = []) {
 	fs.writeFileSync(authPath, updateAccess(text, { ...options, allowlist }));
 }
 
-export function collectHosts(services) {
+export function hosts(services) {
 	const allHosts = [];
 	for (const [, service] of Object.entries(services)) {
 		if (!service.labels) continue;
-		for (const label of labelsOf(service)) {
+		for (const label of serviceLabels(service)) {
 			for (const match of label.matchAll(/Host\(`([^`]+)`\)/g)) {
 				if (!allHosts.includes(match[1])) allHosts.push(match[1]);
 			}
@@ -209,8 +209,8 @@ export function collectHosts(services) {
 	return allHosts;
 }
 
-export function detectHost(services) {
-	const allHosts = collectHosts(services);
+export function primaryHost(services) {
+	const allHosts = hosts(services);
 	return (
 		allHosts.find((h) => h.split('.').length >= 3 && !h.startsWith('www.')) ||
 		allHosts.find((h) => h.split('.').length >= 3) ||
@@ -219,7 +219,7 @@ export function detectHost(services) {
 	);
 }
 
-export function dependsOnServices(service) {
+export function serviceDependencies(service) {
 	const dependsOn = service?.depends_on;
 	if (Array.isArray(dependsOn)) {
 		return dependsOn.filter((name) => typeof name === 'string');
@@ -230,7 +230,7 @@ export function dependsOnServices(service) {
 	return [];
 }
 
-export function dependentServices(services, rootService) {
+export function requiredServices(services, rootService) {
 	if (!services || !Object.hasOwn(services, rootService)) {
 		return new Set();
 	}
@@ -240,7 +240,7 @@ export function dependentServices(services, rootService) {
 
 	while (pending.length > 0) {
 		const serviceName = pending.pop();
-		for (const dependency of dependsOnServices(services[serviceName])) {
+		for (const dependency of serviceDependencies(services[serviceName])) {
 			if (!Object.hasOwn(services, dependency) || selected.has(dependency)) {
 				continue;
 			}
@@ -310,7 +310,7 @@ function pruneVolumes(doc, volumeNames, messages) {
 	}
 }
 
-function applyAuthMiddleware(labels, authMiddleware) {
+function routerMiddlewareLabels(labels, authMiddleware) {
 	const middleware = authMiddleware?.trim();
 	if (!middleware) return labels;
 
@@ -349,7 +349,7 @@ function tempTraefikName(name, serviceName, prNumber) {
 	return `${name}-pr-${prNumber}`;
 }
 
-function rewriteTraefikLabel(label, serviceName, prNumber) {
+function previewTraefikLabel(label, serviceName, prNumber) {
 	return label
 		.replace(
 			/^traefik\.http\.routers\.([^.]+)\./,
@@ -369,7 +369,7 @@ export function rewriteComposeForPreview(doc, options) {
 	const rewritten = structuredClone(doc);
 	const messages = [];
 
-	const selectedServices = dependentServices(rewritten.services, serviceName);
+	const selectedServices = requiredServices(rewritten.services, serviceName);
 	if (selectedServices.size === 0) {
 		throw new Error(`Could not find app service "${serviceName}"`);
 	}
@@ -382,7 +382,7 @@ export function rewriteComposeForPreview(doc, options) {
 	}
 
 	const authRules = tinyauthRules(rewritten.services);
-	const originalHost = detectHost(rewritten.services);
+	const originalHost = primaryHost(rewritten.services);
 	if (!originalHost) {
 		throw new Error('Could not detect domain from traefik Host() labels');
 	}
@@ -402,15 +402,15 @@ export function rewriteComposeForPreview(doc, options) {
 		}
 
 		if (service.labels) {
-			const labels = labelsOf(service)
+			const labels = serviceLabels(service)
 				.filter((label) => !label.includes('redirect'))
 				.map((label) =>
-					rewriteTraefikLabel(label, serviceName, prNumber).replace(
+					previewTraefikLabel(label, serviceName, prNumber).replace(
 						/Host\(`[^`]+`\)/g,
 						`Host(\`${hostname}\`)`,
 					),
 				);
-			service.labels = applyAuthMiddleware(labels, authMiddleware);
+			service.labels = routerMiddlewareLabels(labels, authMiddleware);
 		}
 
 		if (service.volumes) {

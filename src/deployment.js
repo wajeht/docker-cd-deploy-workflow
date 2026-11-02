@@ -14,7 +14,7 @@ function createGitHubApi(token, repo) {
 		'X-GitHub-Api-Version': '2022-11-28',
 	};
 
-	return async function githubApi(path, options = {}) {
+	return async function requestGitHub(path, options = {}) {
 		const res = await fetch(`${apiBase}${path}`, { headers, ...options });
 		if (!res.ok) {
 			throw new Error(`GitHub API ${options.method || 'GET'} ${path}: ${res.status} ${await res.text()}`);
@@ -56,14 +56,14 @@ async function requestDeployment(githubApi, args) {
 	}
 }
 
-function git(args) {
+function runGit(args) {
 	return execFileSync('git', args, {
 		encoding: 'utf8',
 		stdio: ['ignore', 'pipe', 'pipe'],
 	}).trim();
 }
 
-export function deployedRevisionMatches(
+export function isDeploymentCurrent(
 	expected,
 	actual,
 	tempPath,
@@ -74,20 +74,20 @@ export function deployedRevisionMatches(
 	}
 	try {
 		try {
-			git(['cat-file', '-e', actual]);
+			runGit(['cat-file', '-e', actual]);
 		} catch {
-			git(['fetch', 'origin', 'main']);
+			runGit(['fetch', 'origin', 'main']);
 		}
-		git(['merge-base', '--is-ancestor', expected, actual]);
+		runGit(['merge-base', '--is-ancestor', expected, actual]);
 		if (!auth) {
 			return (
-				git(['diff', '--name-only', expected, actual, '--', tempPath]) === ''
+				runGit(['diff', '--name-only', expected, actual, '--', tempPath]) === ''
 			);
 		}
 		const [, app, pr] = path.basename(tempPath).match(/^(.+)-pr-([0-9]+)$/);
 		const ownKey = `TINYAUTH_APPS_${previewId(app, pr)}_`;
-		const settings = (ref) =>
-			git(['show', `${ref}:${authPath}`])
+		function readTinyauthSettings(ref) {
+			return runGit(['show', `${ref}:${authPath}`])
 				.split('\n')
 				.filter((line) => {
 					return (
@@ -96,8 +96,9 @@ export function deployedRevisionMatches(
 					);
 				})
 				.join('\n');
+		}
 		// Other previews may change; our rule and the rest of Tinyauth must still match.
-		return settings(expected) === settings(actual);
+		return readTinyauthSettings(expected) === readTinyauthSettings(actual);
 	} catch {
 		return false;
 	}
@@ -107,7 +108,7 @@ export async function waitForTinyauth(
 	tempPath,
 	{
 		attempts = 60,
-		matches = deployedRevisionMatches,
+		matches = isDeploymentCurrent,
 	} = {},
 ) {
 	const apiUrl = process.env.DOCKER_CD_URL;
@@ -121,9 +122,9 @@ export async function waitForTinyauth(
 	if (api.protocol !== 'https:' || api.username || api.password) {
 		throw new Error('DOCKER_CD_URL must use HTTPS without URL credentials');
 	}
-	const expected = git(['rev-parse', 'HEAD']);
+	const expected = runGit(['rev-parse', 'HEAD']);
 
-	async function projectReady(project) {
+	async function isProjectReady(project) {
 		try {
 			const response = await fetch(
 				new URL(`/api/projects/${encodeURIComponent(project)}`, api),
@@ -172,8 +173,8 @@ export async function waitForTinyauth(
 		attempt++
 	) {
 		if (
-			(await projectReady('tinyauth')) &&
-			(await projectReady(path.basename(tempPath)))
+			(await isProjectReady('tinyauth')) &&
+			(await isProjectReady(path.basename(tempPath)))
 		) {
 			return;
 		}

@@ -8,7 +8,7 @@ function isObject(value) {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function escapeRegExp(value) {
+function escapedRegExp(value) {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
@@ -27,7 +27,7 @@ function replaceServiceImageLine(content, serviceName, image) {
 	}
 
 	const servicesIndent = lines[servicesLine].match(/^(\s*)/)?.[1].length ?? 0;
-	const servicePattern = new RegExp(`^(\\s*)${escapeRegExp(serviceName)}:\\s*(?:#.*)?$`);
+	const servicePattern = new RegExp(`^(\\s*)${escapedRegExp(serviceName)}:\\s*(?:#.*)?$`);
 	let serviceLine = -1;
 	let serviceIndent = -1;
 

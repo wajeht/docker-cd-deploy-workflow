@@ -9,14 +9,14 @@ import yaml from 'js-yaml';
 import {
 	adminAllow,
 	usersAllow,
-	authEnvironment,
-	inheritedAllowlist,
+	parseAuthEnvironment,
+	resolveInheritedAllowlist,
 	tinyauthRules,
 	main,
-	collectHosts,
-	dependentServices,
-	dependsOnServices,
-	detectHost,
+	hosts,
+	requiredServices,
+	serviceDependencies,
+	primaryHost,
 	rewriteComposeForPreview,
 	previewId,
 	updateAccess,
@@ -27,7 +27,7 @@ const scriptPath = path.join(
 	'preview.js',
 );
 
-describe('collectHosts', () => {
+describe('hosts', () => {
 	it('collects all unique hosts from labels', () => {
 		const services = {
 			app: {
@@ -37,7 +37,7 @@ describe('collectHosts', () => {
 				],
 			},
 		};
-		assert.deepStrictEqual(collectHosts(services), [
+		assert.deepStrictEqual(hosts(services), [
 			'closepowerlifting.com',
 			'www.closepowerlifting.com',
 			'close-powerlifting.jaw.dev',
@@ -53,16 +53,16 @@ describe('collectHosts', () => {
 				],
 			},
 		};
-		assert.deepStrictEqual(collectHosts(services), ['app.jaw.dev']);
+		assert.deepStrictEqual(hosts(services), ['app.jaw.dev']);
 	});
 
 	it('returns empty array when no hosts', () => {
 		const services = { app: { labels: ['traefik.enable=true'] } };
-		assert.deepStrictEqual(collectHosts(services), []);
+		assert.deepStrictEqual(hosts(services), []);
 	});
 });
 
-describe('detectHost', () => {
+describe('primaryHost', () => {
 	it('picks jaw.dev subdomain over bare/www domain (closepowerlifting bug)', () => {
 		const services = {
 			app: {
@@ -72,7 +72,7 @@ describe('detectHost', () => {
 				],
 			},
 		};
-		assert.strictEqual(detectHost(services), 'close-powerlifting.jaw.dev');
+		assert.strictEqual(primaryHost(services), 'close-powerlifting.jaw.dev');
 	});
 
 	it('produces correct temp URL for closepowerlifting', () => {
@@ -84,7 +84,7 @@ describe('detectHost', () => {
 				],
 			},
 		};
-		const host = detectHost(services);
+		const host = primaryHost(services);
 		const domain = host.split('.').slice(1).join('.');
 		const hostname = `pr-148-close-powerlifting.${domain}`;
 		assert.strictEqual(hostname, 'pr-148-close-powerlifting.jaw.dev');
@@ -96,7 +96,7 @@ describe('detectHost', () => {
 				labels: ['traefik.http.routers.bang.rule=Host(`bang.jaw.dev`)'],
 			},
 		};
-		assert.strictEqual(detectHost(services), 'bang.jaw.dev');
+		assert.strictEqual(primaryHost(services), 'bang.jaw.dev');
 	});
 
 	it('falls back to bare domain if no subdomain exists', () => {
@@ -105,21 +105,21 @@ describe('detectHost', () => {
 				labels: ['traefik.http.routers.app.rule=Host(`example.com`)'],
 			},
 		};
-		assert.strictEqual(detectHost(services), 'example.com');
+		assert.strictEqual(primaryHost(services), 'example.com');
 	});
 
 	it('returns null when no Host() labels', () => {
 		const services = {
 			app: { labels: ['traefik.enable=true'] },
 		};
-		assert.strictEqual(detectHost(services), null);
+		assert.strictEqual(primaryHost(services), null);
 	});
 
 	it('returns null when no labels at all', () => {
 		const services = {
 			app: { image: 'nginx' },
 		};
-		assert.strictEqual(detectHost(services), null);
+		assert.strictEqual(primaryHost(services), null);
 	});
 
 	it('handles multiple services', () => {
@@ -131,13 +131,13 @@ describe('detectHost', () => {
 				labels: ['traefik.http.routers.redirect.rule=Host(`app.jaw.dev`)'],
 			},
 		};
-		assert.strictEqual(detectHost(services), 'app.jaw.dev');
+		assert.strictEqual(primaryHost(services), 'app.jaw.dev');
 	});
 });
 
-describe('dependsOnServices', () => {
+describe('serviceDependencies', () => {
 	it('reads list syntax', () => {
-		assert.deepStrictEqual(dependsOnServices({ depends_on: ['db', 'redis'] }), [
+		assert.deepStrictEqual(serviceDependencies({ depends_on: ['db', 'redis'] }), [
 			'db',
 			'redis',
 		]);
@@ -145,7 +145,7 @@ describe('dependsOnServices', () => {
 
 	it('reads condition map syntax', () => {
 		assert.deepStrictEqual(
-			dependsOnServices({
+			serviceDependencies({
 				depends_on: { db: { condition: 'service_healthy' } },
 			}),
 			['db'],
@@ -153,13 +153,13 @@ describe('dependsOnServices', () => {
 	});
 
 	it('ignores missing depends_on', () => {
-		assert.deepStrictEqual(dependsOnServices({ image: 'nginx' }), []);
+		assert.deepStrictEqual(serviceDependencies({ image: 'nginx' }), []);
 	});
 });
 
-describe('dependentServices', () => {
+describe('requiredServices', () => {
 	it('keeps the app service when there are no dependencies', () => {
-		const selected = dependentServices(
+		const selected = requiredServices(
 			{ web: { image: 'nginx' }, worker: { image: 'nginx' } },
 			'web',
 		);
@@ -168,7 +168,7 @@ describe('dependentServices', () => {
 	});
 
 	it('follows recursive dependencies and skips siblings', () => {
-		const selected = dependentServices(
+		const selected = requiredServices(
 			{
 				web: { depends_on: { api: { condition: 'service_started' } } },
 				api: { depends_on: ['db'] },
@@ -183,7 +183,7 @@ describe('dependentServices', () => {
 
 	it('returns an empty set when the app service is missing', () => {
 		assert.deepStrictEqual(
-			[...dependentServices({ db: { image: 'postgres' } }, 'web')],
+			[...requiredServices({ db: { image: 'postgres' } }, 'web')],
 			[],
 		);
 	});
@@ -642,7 +642,7 @@ const app = (host = 'admin.example.com', middleware = 'tinyauth@file') => ({
 describe('preview access rules', () => {
 	it('registers exactly one OAuth rule and preserves all production text', () => {
 		const result = updateAccess(config, options);
-		const env = authEnvironment(result);
+		const env = parseAuthEnvironment(result);
 		const id = previewId(options.appPath, options.prNumber);
 		assert.equal(env[`TINYAUTH_APPS_${id}_CONFIG_DOMAIN`], options.hostname);
 		assert.equal(env[`TINYAUTH_APPS_${id}_OAUTH_WHITELIST`], adminAllow);
@@ -666,9 +666,9 @@ describe('preview access rules', () => {
 		assert.throws(() => updateAccess(unowned, options), /unowned/);
 	});
 	it('inherits admin and users allowlists, including middleware chains and map labels', () => {
-		const env = authEnvironment(config);
+		const env = parseAuthEnvironment(config);
 		assert.equal(
-			inheritedAllowlist(tinyauthRules(app().services), env),
+			resolveInheritedAllowlist(tinyauthRules(app().services), env),
 			adminAllow,
 		);
 		const users = app(
@@ -679,11 +679,11 @@ describe('preview access rules', () => {
 			users.services.demo.labels.map((label) => label.split('=')),
 		);
 		assert.equal(
-			inheritedAllowlist(tinyauthRules(users.services), env),
+			resolveInheritedAllowlist(tinyauthRules(users.services), env),
 			usersAllow,
 		);
 		assert.equal(
-			inheritedAllowlist(
+			resolveInheritedAllowlist(
 				tinyauthRules(app('users.example.com', 'rate-limit@file').services),
 				env,
 			),
@@ -691,7 +691,7 @@ describe('preview access rules', () => {
 		);
 		assert.throws(
 			() =>
-				inheritedAllowlist(
+				resolveInheritedAllowlist(
 					tinyauthRules(app('unknown.example.com').services),
 					env,
 				),
@@ -699,7 +699,7 @@ describe('preview access rules', () => {
 		);
 		assert.throws(
 			() =>
-				inheritedAllowlist(
+				resolveInheritedAllowlist(
 					tinyauthRules({
 						...app().services,
 						users: app('users.example.com').services.demo,
@@ -711,12 +711,12 @@ describe('preview access rules', () => {
 	});
 	it('fails closed for default allow or rolling updates', () => {
 		assert.throws(
-			() => authEnvironment(config.replace('POLICY: deny', 'POLICY: allow')),
+			() => parseAuthEnvironment(config.replace('POLICY: deny', 'POLICY: allow')),
 			/deny/,
 		);
 		assert.throws(
 			() =>
-				authEnvironment(
+				parseAuthEnvironment(
 					config.replace('rolling_update: false', 'rolling_update: true'),
 				),
 			/recreation/,
@@ -749,15 +749,16 @@ describe('preview access rules', () => {
 					middleware,
 				]);
 			};
-			const read = () =>
-				fs.readFileSync('apps/tinyauth/docker-compose.yml', 'utf8');
+			function readConfig() {
+				return fs.readFileSync('apps/tinyauth/docker-compose.yml', 'utf8');
+			}
 			const key = `TINYAUTH_APPS_${previewId('apps/demo', '42')}_OAUTH_WHITELIST`;
 			await run(app('users.example.com'));
-			assert.equal(authEnvironment(read())[key], usersAllow);
+			assert.equal(parseAuthEnvironment(readConfig())[key], usersAllow);
 			await run(app('users.example.com'), 'tinyauth@file');
-			assert.equal(authEnvironment(read())[key], adminAllow);
+			assert.equal(parseAuthEnvironment(readConfig())[key], adminAllow);
 			await run(app('users.example.com', 'rate-limit@file'));
-			assert.equal(read(), config);
+			assert.equal(readConfig(), config);
 			await run(app('users.example.com', 'rate-limit@file'), 'tinyauth@file');
 			fs.rmSync('apps/demo-pr-42', { recursive: true });
 			await main([
@@ -776,7 +777,7 @@ describe('preview access rules', () => {
 				'--pr-number',
 				'42',
 			]);
-			assert.equal(read(), config);
+			assert.equal(readConfig(), config);
 			fs.rmSync('apps/tinyauth', { recursive: true });
 			await assert.rejects(() => run(app()), /missing/);
 		} finally {

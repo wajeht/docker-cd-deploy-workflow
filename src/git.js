@@ -15,7 +15,7 @@ export async function main(argv = process.argv.slice(2)) {
 	if (!args['message']) {
 		throw new Error('Missing required arg: --message');
 	}
-	function run(cmd, cmdArgs) {
+	function runCommand(cmd, cmdArgs) {
 		console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
 		return execFileSync(cmd, cmdArgs, { stdio: 'inherit' });
 	}
@@ -26,17 +26,17 @@ export async function main(argv = process.argv.slice(2)) {
 
 	const message = args['message'];
 	const paths = args['paths'];
-	const all = args['all'] === true;
+	const allFiles = args['all'] === true;
 
-	run('git', ['config', 'user.name', 'github-actions[bot]']);
-	run('git', [
+	runCommand('git', ['config', 'user.name', 'github-actions[bot]']);
+	runCommand('git', [
 		'config',
 		'user.email',
 		'github-actions[bot]@users.noreply.github.com',
 	]);
 
-	if (all) {
-		run('git', ['add', '-A']);
+	if (allFiles) {
+		runCommand('git', ['add', '-A']);
 	} else {
 		for (const selectedPath of paths) {
 			try {
@@ -60,11 +60,11 @@ export async function main(argv = process.argv.slice(2)) {
 		// has staged changes, continue
 	}
 
-	run('git', ['commit', '-m', message]);
+	runCommand('git', ['commit', '-m', message]);
 
 	for (let i = 1; i <= 3; i++) {
 		try {
-			run('git', ['push']);
+			runCommand('git', ['push']);
 			return;
 		} catch {
 			if (i === 3) {
@@ -72,7 +72,7 @@ export async function main(argv = process.argv.slice(2)) {
 			}
 			console.log(`Push failed (attempt ${i}/3), rebasing...`);
 			try {
-				run('git', ['pull', '--rebase', 'origin', 'main']);
+				runCommand('git', ['pull', '--rebase', 'origin', 'main']);
 			} catch {
 				throw new Error(
 					'Concurrent changes conflict; rerun the workflow from the latest Home Ops main',
