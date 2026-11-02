@@ -27,8 +27,14 @@ on:
       auth-middleware:
         type: string
         default: ""
-        description: "Optional Traefik middleware for temp routers (e.g., oauth2-admin@file)"
+        description: "Optional Traefik middleware for temp routers (e.g., tinyauth@file)"
     secrets:
+      DOCKER_CD_URL:
+        required: false
+        description: "HTTPS docker-cd URL; required when Home Ops contains Tinyauth"
+      DOCKER_CD_API_SECRET:
+        required: false
+        description: "docker-cd API bearer token; required when Home Ops contains Tinyauth"
       GH_TOKEN:
         required: true
         description: "GitHub PAT with repo and packages access"
@@ -44,11 +50,16 @@ jobs:
       deployments: write
     outputs:
       url: ${{ steps.rewrite.outputs.url }}
+    env:
+      DOCKER_CD_URL: ${{ secrets.DOCKER_CD_URL }}
+      DOCKER_CD_API_SECRET: ${{ secrets.DOCKER_CD_API_SECRET }}
     steps:
       - name: Checkout home-ops
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.home-ops-repo }}
+          ref: main
+          fetch-depth: 0
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Checkout deploy workflow scripts
@@ -86,10 +97,12 @@ jobs:
             --environment "pr-${{ github.event.pull_request.number }}" \
             --ref "${{ github.event.pull_request.head.sha }}"
 
-      - name: Rewrite compose for temp deploy
+      - name: Register and push preview
         id: rewrite
         run: |
-          node .deploy-workflow/src/temp-compose.js \
+          node .deploy-workflow/src/temp-push.js \
+            --action deploy \
+            --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}" \
             --app-path "${{ inputs.app-path }}" \
             --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \
@@ -98,11 +111,13 @@ jobs:
             --auth-middleware "${{ inputs.auth-middleware }}" \
             --app-repo-path .app-repo
 
-      - name: Commit and push
+      - name: Wait for preview and Tinyauth deployment
+        if: steps.rewrite.outputs.auth-managed == 'true'
         run: |
-          node .deploy-workflow/src/git-push.js \
-            --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
-            --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
+          node .deploy-workflow/src/wait-preview.js \
+            --app-path "${{ inputs.app-path }}" \
+            --pr-number "${{ github.event.pull_request.number }}" \
+            --commit "${{ steps.rewrite.outputs.commit }}"
 
       - name: Mark deployment success
         run: |
@@ -112,7 +127,19 @@ jobs:
             --repo "${{ github.repository }}" \
             --environment "pr-${{ github.event.pull_request.number }}" \
             --deployment-id "${{ steps.deployment.outputs.deployment-id }}" \
-            --url "${{ steps.rewrite.outputs.url }}"
+            --url "${{ steps.rewrite.outputs.url }}" \
+            --verified "${{ steps.rewrite.outputs.auth-managed }}"
+
+      - name: Mark deployment failed
+        if: failure() && steps.deployment.outputs.deployment-id != ''
+        run: |
+          node .deploy-workflow/src/deployment.js \
+            --action failure \
+            --token "${{ github.token }}" \
+            --repo "${{ github.repository }}" \
+            --environment "pr-${{ github.event.pull_request.number }}" \
+            --deployment-id "${{ steps.deployment.outputs.deployment-id }}"
 
       - name: Cleanup workflow scripts
+        if: always()
         run: rm -rf .deploy-workflow .app-repo

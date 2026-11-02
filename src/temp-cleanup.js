@@ -9,6 +9,7 @@ export async function main(argv = process.argv.slice(2)) {
 		options: {
 			'app-path': { type: 'string' },
 			'pr-number': { type: 'string' },
+			'manage-access': { type: 'boolean' },
 		},
 	});
 	for (const key of ['app-path', 'pr-number']) {
@@ -17,14 +18,18 @@ export async function main(argv = process.argv.slice(2)) {
 	const appPath = args['app-path'];
 	const prNumber = args['pr-number'];
 	const tempPath = `${appPath}-pr-${prNumber}`;
+	const authManaged = args['manage-access']
+		? (await import('./preview-access.js')).syncAccess({ appPath, prNumber, cleanup: true })
+		: false;
 
 	if (!fs.existsSync(tempPath)) {
 		console.log(`Temp stack ${tempPath} does not exist, nothing to clean up`);
-		return;
+		return { tempPath, authManaged };
 	}
 
 	fs.rmSync(tempPath, { recursive: true });
 	console.log(`Removed temp stack at ${tempPath}`);
+	return { tempPath, authManaged };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

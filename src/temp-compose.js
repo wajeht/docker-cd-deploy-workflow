@@ -3,12 +3,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import yaml from 'js-yaml';
+import { labelsOf, syncAccess } from './preview-access.js';
 
 export function collectHosts(services) {
 	const allHosts = [];
 	for (const [, service] of Object.entries(services)) {
 		if (!service.labels) continue;
-		for (const label of service.labels) {
+		for (const label of labelsOf(service)) {
 			for (const match of label.matchAll(/Host\(`([^`]+)`\)/g)) {
 				if (!allHosts.includes(match[1])) allHosts.push(match[1]);
 			}
@@ -192,7 +193,7 @@ export function rewriteComposeForTempDeploy(doc, options) {
 		}
 
 		if (service.labels) {
-			const labels = service.labels
+			const labels = labelsOf(service)
 				.filter((label) => !label.includes('redirect'))
 				.map((label) =>
 					rewriteTraefikLabel(label, serviceName, prNumber).replace(/Host\(`[^`]+`\)/g, `Host(\`${hostname}\`)`),
@@ -249,6 +250,7 @@ export async function main(argv = process.argv.slice(2)) {
 			'repo-owner': { type: 'string' },
 			'app-repo-path': { type: 'string' },
 			'auth-middleware': { type: 'string' },
+			'manage-access': { type: 'boolean' },
 		},
 	});
 	for (const key of ['app-path', 'service-name', 'tag', 'pr-number', 'repo-owner']) {
@@ -278,6 +280,13 @@ export async function main(argv = process.argv.slice(2)) {
 	const composePath = path.join(tempPath, 'docker-compose.yml');
 	const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
 	const result = rewriteComposeForTempDeploy(doc, { appName, serviceName, tag, prNumber, repoOwner, authMiddleware });
+	const selected = dependentServices(doc.services, serviceName);
+	const services = Object.fromEntries(Object.entries(doc.services).filter(([name]) => selected.has(name)));
+	// An explicit override replaces inherited middleware, including a switch to public mode.
+	if (authMiddleware?.trim()) {
+		for (const service of Object.values(services)) service.labels = applyAuthMiddleware(labelsOf(service), authMiddleware);
+	}
+	const authManaged = args['manage-access'] && syncAccess({ appPath, prNumber, hostname: result.hostname, authMiddleware }, services);
 	for (const message of result.messages) {
 		console.log(message);
 	}
@@ -295,14 +304,13 @@ export async function main(argv = process.argv.slice(2)) {
 
 	console.log(`Created temp stack at ${tempPath}`);
 	console.log(`URL: ${result.url}`);
-	console.log('--- docker-compose.yml ---');
-	console.log(fs.readFileSync(composePath, 'utf8'));
 
 	const outputFile = process.env.GITHUB_OUTPUT;
 	if (outputFile) {
 		fs.appendFileSync(outputFile, `url=${result.url}\n`);
 		fs.appendFileSync(outputFile, `temp-path=${tempPath}\n`);
 	}
+	return { ...result, tempPath, authManaged };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

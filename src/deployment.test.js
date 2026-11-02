@@ -54,6 +54,22 @@ function withGithubOutput(t) {
 }
 
 describe('deployment', () => {
+	it('reports verified readiness without following a login redirect', async (t) => {
+		const fetch = fakeFetch([{}]);
+		withFetch(t, fetch);
+		await main(['--token', 'token', '--repo', 'wajeht/app', '--action', 'deploy', '--environment', 'pr-1',
+			'--deployment-id', '123', '--url', 'https://pr-1-app.example.com', '--verified', 'true']);
+		assert.strictEqual(fetch.calls.length, 1);
+		assert.strictEqual(fetch.calls[0].body.description, 'Temp deploy and access rules are ready');
+	});
+
+	it('marks a failed preview deployment as failure', async (t) => {
+		const fetch = fakeFetch([{}]);
+		withFetch(t, fetch);
+		await main(['--token', 'token', '--repo', 'wajeht/app', '--action', 'failure', '--environment', 'pr-1', '--deployment-id', '123']);
+		assert.strictEqual(fetch.calls[0].body.state, 'failure');
+	});
+
 	it('requests a deployment and writes the deployment id output', async (t) => {
 		const fetch = fakeFetch([{ json: { id: 123 } }, {}]);
 		const outputFile = withGithubOutput(t);

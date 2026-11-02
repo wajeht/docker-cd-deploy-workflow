@@ -31,7 +31,7 @@ jobs:
 For PR previews, app repos can use:
 
 - `temp-deploy` for a normal temp app with production middleware labels
-- `temp-deploy-with-auth` plus `auth-middleware: oauth2-admin@file` for an auth-protected temp app
+- `temp-deploy-with-auth` plus `auth-middleware: tinyauth@file` for an auth-protected temp app
 
 ## Docs
 

@@ -64,7 +64,9 @@ async function markDeploymentSuccess(githubApi, args) {
 	}
 
 	let description;
-	if (skipHealthCheck) {
+	if (args.verified === 'true') {
+		description = 'Temp deploy and access rules are ready';
+	} else if (skipHealthCheck) {
 		description = 'Deploy committed, docker-cd will pick it up';
 		console.log(description);
 	} else {
@@ -134,6 +136,7 @@ export async function main(argv = process.argv.slice(2)) {
 			url: { type: 'string' },
 			'deployment-id': { type: 'string' },
 			'skip-health-check': { type: 'string' },
+			verified: { type: 'string' },
 		},
 	});
 	for (const key of ['token', 'repo', 'action', 'environment']) {
@@ -148,6 +151,11 @@ export async function main(argv = process.argv.slice(2)) {
 		await markDeploymentSuccess(githubApi, args);
 	} else if (action === 'cleanup') {
 		await cleanupDeployments(githubApi, args);
+	} else if (action === 'failure') {
+		if (!args['deployment-id']) throw new Error('--deployment-id is required for failure action');
+		await githubApi(`/deployments/${args['deployment-id']}/statuses`, {
+			method: 'POST', body: JSON.stringify({ state: 'failure', description: 'Preview or access rule deployment failed' }),
+		});
 	} else {
 		throw new Error(`Unknown action: ${action}`);
 	}

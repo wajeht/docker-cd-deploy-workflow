@@ -32,7 +32,8 @@ Close PR or remove the last temp deploy label
 1. Wildcard DNS for `*.jaw.dev`
 2. Wildcard TLS cert in Traefik for `*.jaw.dev`
 3. `GH_TOKEN` secret with `repo` and `packages` scope
-4. `temp-deploy` and `temp-deploy-with-auth` labels:
+4. For Home Ops with Tinyauth: `DOCKER_CD_URL` (HTTPS API origin) and `DOCKER_CD_API_SECRET` secrets in the caller repo, forwarded to both workflows
+5. `temp-deploy` and `temp-deploy-with-auth` labels:
 
 ```bash
 gh label create temp-deploy
@@ -41,7 +42,7 @@ gh label create temp-deploy-with-auth
 
 ## Setup
 
-Add `pull_request` types to CI and append temp build/deploy jobs:
+Replace `RELEASE_COMMIT` below with the released commit containing Tinyauth preview support. Add `pull_request` types to CI and append temp build/deploy jobs:
 
 ```yaml
 name: CI
@@ -104,14 +105,16 @@ jobs:
     needs: temp-build
     permissions:
       deployments: write
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@v0.0.25
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-deploy.yaml@RELEASE_COMMIT
     with:
       app-path: apps/your-app
       service-name: your-app
       tag: ${{ needs.temp-build.outputs.tag }}
-      auth-middleware: ${{ contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth') && 'oauth2-admin@file' || '' }}
+      auth-middleware: ${{ contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth') && 'tinyauth@file' || '' }}
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      DOCKER_CD_URL: ${{ secrets.DOCKER_CD_URL }}
+      DOCKER_CD_API_SECRET: ${{ secrets.DOCKER_CD_API_SECRET }}
 ```
 
 Put cleanup in its own workflow so CI deploy jobs cannot cancel it.
@@ -145,11 +148,13 @@ jobs:
         !contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth'))
     permissions:
       deployments: write
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@v0.0.25
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/temp-cleanup.yaml@RELEASE_COMMIT
     with:
       app-path: apps/your-app
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      DOCKER_CD_URL: ${{ secrets.DOCKER_CD_URL }}
+      DOCKER_CD_API_SECRET: ${{ secrets.DOCKER_CD_API_SECRET }}
 ```
 
 ## What Gets Rewritten
@@ -197,21 +202,25 @@ with:
   app-path: apps/bang
   service-name: bang
   tag: ${{ needs.temp-build.outputs.tag }}
-  auth-middleware: oauth2-admin@file
+  auth-middleware: tinyauth@file
 ```
 
-If omitted, temp deploys keep the production middleware labels.
+If omitted, temp deploys keep the production middleware labels. Inherited Tinyauth routes copy their exact production domain's `TINYAUTH_ADMIN_ALLOW` or `TINYAUTH_USERS_ALLOW` OAuth allowlist. Explicit `tinyauth@file` previews always use `TINYAUTH_ADMIN_ALLOW`. Conflicting or missing inherited rules fail closed.
+
+The workflows commit the preview stack and its exact-domain rule together. Each preview owns a marked block in `apps/tinyauth/docker-compose.yml`; redeploys reuse it, public mode removes it, and cleanup removes it even if the stack directory is already gone. No wildcard rules or Basic authentication are added. Conflicting Git pushes rerun the operation on the latest Home Ops main, preserving other previews and production rules.
+
+Home Ops must keep Tinyauth's `rolling_update: false` and default-deny ACL policy. docker-cd recreates it when its environment changes. The workflows wait up to roughly ten minutes for docker-cd's authenticated API to confirm the committed configuration and healthy containers, including Tinyauth. Cleanup also waits for the preview to disappear. A timeout fails the job; a login-page redirect never counts as readiness. These API checks do not replace a real Google-login test.
 
 For per-PR auth, gate the input from labels:
 
 ```yaml
-auth-middleware: ${{ contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth') && 'oauth2-admin@file' || '' }}
+auth-middleware: ${{ contains(github.event.pull_request.labels.*.name, 'temp-deploy-with-auth') && 'tinyauth@file' || '' }}
 ```
 
 Recommended label behavior:
 
 - `temp-deploy`: deploy a temp app with the production middleware labels
-- `temp-deploy-with-auth`: deploy the same temp app with `oauth2-admin@file`
+- `temp-deploy-with-auth`: deploy the same temp app with `tinyauth@file`
 - if both labels are present, auth wins because the auth label sets `auth-middleware`
 - removing one temp label redeploys with the remaining mode
 - removing the last temp label runs cleanup
@@ -227,7 +236,7 @@ Recommended label behavior:
 | `app-path` | Yes | - | Base app path, like `apps/bang` |
 | `service-name` | Yes | - | Compose service to deploy, like `bang` |
 | `tag` | Yes | - | Image tag |
-| `auth-middleware` | No | empty | Optional Traefik middleware for temp routers, like `oauth2-admin@file` |
+| `auth-middleware` | No | empty | Optional Traefik middleware for temp routers, like `tinyauth@file` |
 
 ### Temp Cleanup
 
@@ -236,3 +245,9 @@ Recommended label behavior:
 | `runs-on` | No | `["ubuntu-latest"]` | Runner labels as a JSON array |
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Base app path, like `apps/bang` |
+
+## Rollout
+
+Release this workflow change, then update **both** preview deploy and cleanup pins in `bang`, `jaw.dev`, and `videos`. Forward the two docker-cd secrets above and replace `oauth2-admin@file` inputs with `tinyauth@file` during the Home Ops auth cutover. Do not switch callers while live routes still use OAuth2 Proxy. Merging this PR alone does not release or update those callers.
+
+After cutover, verify Google admin access, users-only denial on an explicit admin preview, inherited users access, Basic gateway rejection, unknown-domain denial, public mode, and cleanup after PR closure or removing the last preview label.
