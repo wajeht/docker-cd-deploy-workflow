@@ -188,11 +188,22 @@ describe('deployment', () => {
 		process.env.DOCKER_CD_URL = 'https://cd.example.com';
 		process.env.DOCKER_CD_API_SECRET = 'test';
 		t.after(() => {
-			if (oldUrl === undefined) delete process.env.DOCKER_CD_URL; else process.env.DOCKER_CD_URL = oldUrl;
-			if (oldSecret === undefined) delete process.env.DOCKER_CD_API_SECRET; else process.env.DOCKER_CD_API_SECRET = oldSecret;
+			if (oldUrl === undefined) {
+				delete process.env.DOCKER_CD_URL;
+			} else {
+				process.env.DOCKER_CD_URL = oldUrl;
+			}
+			if (oldSecret === undefined) {
+				delete process.env.DOCKER_CD_API_SECRET;
+			} else {
+				process.env.DOCKER_CD_API_SECRET = oldSecret;
+			}
 		});
-		const ready = { sync: 'synced', lastDeploy: { status: 'synced', commitSHA: 'a'.repeat(40) },
-			health: { total: 1, running: 1, healthy: 1, starting: 0, unhealthy: 0 } };
+		const ready = {
+			sync: 'synced',
+			lastDeploy: { status: 'synced', commitSHA: 'a'.repeat(40) },
+			health: { total: 1, running: 1, healthy: 1, starting: 0, unhealthy: 0 },
+		};
 		const options = { attempts: 1, matches: () => true };
 		withFetch(t, async (url, request) => {
 			assert.strictEqual(request.redirect, 'error');
@@ -200,15 +211,34 @@ describe('deployment', () => {
 			return Response.json({ success: true, data: ready });
 		});
 		await waitForTinyauth('apps/demo-pr-42', options);
-		await assert.rejects(() => waitForTinyauth('apps/demo-pr-42', { ...options, matches: () => false }), /Timed out/);
-		for (const data of [{ ...ready, lastDeploy: { status: 'failed' } }, { ...ready, health: { ...ready.health, starting: 1 } }]) {
+		await assert.rejects(
+			() =>
+				waitForTinyauth('apps/demo-pr-42', {
+					...options,
+					matches: () => false,
+				}),
+			/Timed out/,
+		);
+		for (const data of [
+			{ ...ready, lastDeploy: { status: 'failed' } },
+			{ ...ready, health: { ...ready.health, starting: 1 } },
+		]) {
 			globalThis.fetch = async () => Response.json({ success: true, data });
-			await assert.rejects(() => waitForTinyauth('apps/demo-pr-42', options), /Timed out/);
+			await assert.rejects(
+				() => waitForTinyauth('apps/demo-pr-42', options),
+				/Timed out/,
+			);
 		}
 		globalThis.fetch = async () => new Response('<html>login</html>');
-		await assert.rejects(() => waitForTinyauth('apps/demo-pr-42', options), /Timed out/);
+		await assert.rejects(
+			() => waitForTinyauth('apps/demo-pr-42', options),
+			/Timed out/,
+		);
 		globalThis.fetch = async () => new Response('', { status: 401 });
-		await assert.rejects(() => waitForTinyauth('apps/demo-pr-42', options), /authentication/);
+		await assert.rejects(
+			() => waitForTinyauth('apps/demo-pr-42', options),
+			/authentication/,
+		);
 	});
 
 	it('parses folded middleware labels and records protected deployment failures', async (t) => {
@@ -219,24 +249,54 @@ describe('deployment', () => {
 		process.env.DOCKER_CD_API_SECRET = 'test';
 		t.after(() => {
 			fs.rmSync(dir, { recursive: true, force: true });
-			if (oldUrl === undefined) delete process.env.DOCKER_CD_URL; else process.env.DOCKER_CD_URL = oldUrl;
-			if (oldSecret === undefined) delete process.env.DOCKER_CD_API_SECRET; else process.env.DOCKER_CD_API_SECRET = oldSecret;
+			if (oldUrl === undefined) {
+				delete process.env.DOCKER_CD_URL;
+			} else {
+				process.env.DOCKER_CD_URL = oldUrl;
+			}
+			if (oldSecret === undefined) {
+				delete process.env.DOCKER_CD_API_SECRET;
+			} else {
+				process.env.DOCKER_CD_API_SECRET = oldSecret;
+			}
 		});
-		fs.writeFileSync(path.join(dir, 'docker-compose.yml'), `services:
+		fs.writeFileSync(
+			path.join(dir, 'docker-compose.yml'),
+			`services:
   web:
     labels:
       traefik.http.routers.web.middlewares: >-
         tinyauth@file
-`);
+`,
+		);
 		const fetch = fakeFetch([{ ok: false, status: 401 }, {}]);
 		withFetch(t, fetch);
-		const args = ['--token', 'test', '--repo', 'wajeht/app', '--action', 'deploy', '--environment', 'pr-42',
-			'--deployment-id', '123', '--url', 'https://pr-42.example.com', '--app-path', dir, '--skip-health-check', 'true'];
+		const args = [
+			'--token',
+			'test',
+			'--repo',
+			'wajeht/app',
+			'--action',
+			'deploy',
+			'--environment',
+			'pr-42',
+			'--deployment-id',
+			'123',
+			'--url',
+			'https://pr-42.example.com',
+			'--app-path',
+			dir,
+			'--skip-health-check',
+			'true',
+		];
 		await assert.rejects(() => main(args), /authentication/);
 		assert.strictEqual(fetch.calls[1].body.state, 'failure');
 
 		// Comments mentioning the middleware must not turn a public preview into a protected one.
-		fs.writeFileSync(path.join(dir, 'docker-compose.yml'), 'services:\n  web:\n    # middlewares=tinyauth@file\n    image: nginx\n');
+		fs.writeFileSync(
+			path.join(dir, 'docker-compose.yml'),
+			'services:\n  web:\n    # middlewares=tinyauth@file\n    image: nginx\n',
+		);
 		const publicFetch = fakeFetch([{}]);
 		globalThis.fetch = publicFetch;
 		await main(args);

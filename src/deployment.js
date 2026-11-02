@@ -57,11 +57,21 @@ async function requestDeployment(githubApi, args) {
 }
 
 function git(args) {
-	return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+	return execFileSync('git', args, {
+		encoding: 'utf8',
+		stdio: ['ignore', 'pipe', 'pipe'],
+	}).trim();
 }
 
-export function deployedRevisionMatches(expected, actual, tempPath, auth = false) {
-	if (!/^[a-f0-9]{40}$/.test(actual || '')) return false;
+export function deployedRevisionMatches(
+	expected,
+	actual,
+	tempPath,
+	auth = false,
+) {
+	if (!/^[a-f0-9]{40}$/.test(actual || '')) {
+		return false;
+	}
 	try {
 		try {
 			git(['cat-file', '-e', actual]);
@@ -69,13 +79,18 @@ export function deployedRevisionMatches(expected, actual, tempPath, auth = false
 			git(['fetch', 'origin', 'main']);
 		}
 		git(['merge-base', '--is-ancestor', expected, actual]);
-		if (!auth) return git(['diff', '--name-only', expected, actual, '--', tempPath]) === '';
+		if (!auth) {
+			return (
+				git(['diff', '--name-only', expected, actual, '--', tempPath]) === ''
+			);
+		}
 		const [, app, pr] = path.basename(tempPath).match(/^(.+)-pr-([0-9]+)$/);
 		const ownId = previewId(app, pr);
-		const settings = (ref) => git(['show', `${ref}:${authPath}`]).replace(
-			/^      # preview-access:(PREVIEW[A-F0-9]+):start\n[\s\S]*?^      # preview-access:\1:end\n/gm,
-			(block, id) => id === ownId ? block : '',
-		);
+		const settings = (ref) =>
+			git(['show', `${ref}:${authPath}`]).replace(
+				/^      # preview-access:(PREVIEW[A-F0-9]+):start\n[\s\S]*?^      # preview-access:\1:end\n/gm,
+				(block, id) => (id === ownId ? block : ''),
+			);
 		// Other previews may change; our rule and the rest of Tinyauth must still match.
 		return settings(expected) === settings(actual);
 	} catch {
@@ -83,42 +98,98 @@ export function deployedRevisionMatches(expected, actual, tempPath, auth = false
 	}
 }
 
-export async function waitForTinyauth(tempPath, {
-	attempts = 60,
-	pause = () => new Promise((resolve) => setTimeout(resolve, 10000)),
-	matches = deployedRevisionMatches,
-} = {}) {
+export async function waitForTinyauth(
+	tempPath,
+	{
+		attempts = 60,
+		pause = () => new Promise((resolve) => setTimeout(resolve, 10000)),
+		matches = deployedRevisionMatches,
+	} = {},
+) {
 	const api = new URL(process.env.DOCKER_CD_URL || 'http://missing');
-	if (api.protocol !== 'https:' || api.username || api.password || !process.env.DOCKER_CD_API_SECRET) {
-		throw new Error('Tinyauth previews require HTTPS DOCKER_CD_URL and DOCKER_CD_API_SECRET');
+	if (
+		api.protocol !== 'https:' ||
+		api.username ||
+		api.password ||
+		!process.env.DOCKER_CD_API_SECRET
+	) {
+		throw new Error(
+			'Tinyauth previews require HTTPS DOCKER_CD_URL and DOCKER_CD_API_SECRET',
+		);
 	}
 	const expected = git(['rev-parse', 'HEAD']);
 	const projects = ['tinyauth', path.basename(tempPath)];
 	const deadline = Date.now() + 600000;
-	for (let attempt = 0; attempt < attempts && Date.now() < deadline; attempt++) {
+	for (
+		let attempt = 0;
+		attempt < attempts && Date.now() < deadline;
+		attempt++
+	) {
 		let ready = 0;
 		for (const project of projects) {
 			try {
-				const res = await fetch(new URL(`/api/projects/${encodeURIComponent(project)}`, api), {
-					headers: { Authorization: `Bearer ${process.env.DOCKER_CD_API_SECRET}` },
-					redirect: 'error', signal: AbortSignal.timeout(5000),
-				});
-				if (res.status === 401 || res.status === 403) throw new Error('docker-cd API authentication failed');
-				if (!res.ok) continue;
+				const res = await fetch(
+					new URL(`/api/projects/${encodeURIComponent(project)}`, api),
+					{
+						headers: {
+							Authorization: `Bearer ${process.env.DOCKER_CD_API_SECRET}`,
+						},
+						redirect: 'error',
+						signal: AbortSignal.timeout(5000),
+					},
+				);
+				if (res.status === 401 || res.status === 403) {
+					throw new Error('docker-cd API authentication failed');
+				}
+				if (!res.ok) {
+					continue;
+				}
 				const { success, data } = await res.json();
 				const health = data?.health;
-				if (!success || data?.sync !== 'synced' || data.lastDeploy?.status !== 'synced') continue;
-				if (!health?.total || health.running !== health.total || health.starting !== 0 || health.unhealthy !== 0) continue;
-				if (project === 'tinyauth' && health.healthy !== health.total) continue;
-				if (matches(expected, data.lastDeploy.commitSHA, tempPath, project === 'tinyauth')) ready++;
+				if (
+					!success ||
+					data?.sync !== 'synced' ||
+					data.lastDeploy?.status !== 'synced'
+				) {
+					continue;
+				}
+				if (
+					!health?.total ||
+					health.running !== health.total ||
+					health.starting !== 0 ||
+					health.unhealthy !== 0
+				) {
+					continue;
+				}
+				if (project === 'tinyauth' && health.healthy !== health.total) {
+					continue;
+				}
+				if (
+					matches(
+						expected,
+						data.lastDeploy.commitSHA,
+						tempPath,
+						project === 'tinyauth',
+					)
+				) {
+					ready++;
+				}
 			} catch (error) {
-				if (error.message === 'docker-cd API authentication failed') throw error;
+				if (error.message === 'docker-cd API authentication failed') {
+					throw error;
+				}
 			}
 		}
-		if (ready === projects.length) return;
-		if (attempt + 1 < attempts) await pause();
+		if (ready === projects.length) {
+			return;
+		}
+		if (attempt + 1 < attempts) {
+			await pause();
+		}
 	}
-	throw new Error('Timed out waiting for the preview and Tinyauth configuration to deploy');
+	throw new Error(
+		'Timed out waiting for the preview and Tinyauth configuration to deploy',
+	);
 }
 
 async function markDeploymentSuccess(githubApi, args) {
@@ -142,7 +213,11 @@ async function markDeploymentSuccess(githubApi, args) {
 			await waitForTinyauth(args['app-path']);
 		} catch (error) {
 			await githubApi(`/deployments/${deploymentId}/statuses`, {
-				method: 'POST', body: JSON.stringify({ state: 'failure', description: 'Preview or Tinyauth deployment failed' }),
+				method: 'POST',
+				body: JSON.stringify({
+					state: 'failure',
+					description: 'Preview or Tinyauth deployment failed',
+				}),
 			});
 			throw error;
 		}
@@ -164,9 +239,13 @@ async function markDeploymentSuccess(githubApi, args) {
 			} catch {
 				console.log(`Attempt ${i}/24: not reachable`);
 			}
-			if (i < 24) await new Promise((r) => setTimeout(r, 5000));
+			if (i < 24) {
+				await new Promise((r) => setTimeout(r, 5000));
+			}
 		}
-		description = healthy ? 'Temp deploy is ready' : 'Temp deploy will be ready in a few seconds';
+		description = healthy
+			? 'Temp deploy is ready'
+			: 'Temp deploy will be ready in a few seconds';
 		console.log(description);
 	}
 

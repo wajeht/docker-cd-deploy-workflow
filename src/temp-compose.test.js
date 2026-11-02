@@ -560,11 +560,23 @@ services:
       TINYAUTH_APPS_USERS_OAUTH_WHITELIST: \${TINYAUTH_USERS_ALLOW:?required}
       TZ: America/Chicago
 `;
-const options = { appPath: 'apps/demo', prNumber: '42', hostname: 'pr-42-demo.example.com', allowlist: adminAllow };
-const app = (host = 'admin.example.com', middleware = 'tinyauth@file') => ({ services: { demo: { image: 'ghcr.io/test/demo:old', labels: [
-	`traefik.http.routers.demo.rule=Host(\`${host}\`)`,
-	`traefik.http.routers.demo.middlewares=${middleware}`,
-] } } });
+const options = {
+	appPath: 'apps/demo',
+	prNumber: '42',
+	hostname: 'pr-42-demo.example.com',
+	allowlist: adminAllow,
+};
+const app = (host = 'admin.example.com', middleware = 'tinyauth@file') => ({
+	services: {
+		demo: {
+			image: 'ghcr.io/test/demo:old',
+			labels: [
+				`traefik.http.routers.demo.rule=Host(\`${host}\`)`,
+				`traefik.http.routers.demo.middlewares=${middleware}`,
+			],
+		},
+	},
+});
 
 describe('preview access rules', () => {
 	it('registers exactly one OAuth rule and preserves all production text', () => {
@@ -578,26 +590,63 @@ describe('preview access rules', () => {
 		assert.ok(!result.includes('BASICAUTH'));
 	});
 	it('removes only the owned rule and rejects an unowned collision', () => {
-		const other = { ...options, prNumber: '43', hostname: 'pr-43-demo.example.com' };
+		const other = {
+			...options,
+			prNumber: '43',
+			hostname: 'pr-43-demo.example.com',
+		};
 		const second = updateAccess(config, other);
 		const both = updateAccess(second, options);
 		assert.equal(updateAccess(both, { ...options, allowlist: null }), second);
-		const unowned = updateAccess(config, options).split('\n').filter((line) => !line.includes('# preview-access:')).join('\n');
+		const unowned = updateAccess(config, options)
+			.split('\n')
+			.filter((line) => !line.includes('# preview-access:'))
+			.join('\n');
 		assert.throws(() => updateAccess(unowned, options), /unowned/);
 	});
 	it('inherits admin and users allowlists, including middleware chains and map labels', () => {
 		const env = authEnvironment(config);
 		assert.equal(inheritedAllowlist(app().services, env), adminAllow);
-		const users = app('users.example.com', 'rate-limit@file,tinyauth-no-ratelimit@file');
-		users.services.demo.labels = Object.fromEntries(users.services.demo.labels.map((label) => label.split('=')));
+		const users = app(
+			'users.example.com',
+			'rate-limit@file,tinyauth-no-ratelimit@file',
+		);
+		users.services.demo.labels = Object.fromEntries(
+			users.services.demo.labels.map((label) => label.split('=')),
+		);
 		assert.equal(inheritedAllowlist(users.services, env), usersAllow);
-		assert.equal(inheritedAllowlist(app('users.example.com', 'rate-limit@file').services, env), null);
-		assert.throws(() => inheritedAllowlist(app('unknown.example.com').services, env), /Expected one/);
-		assert.throws(() => inheritedAllowlist({ ...app().services, users: app('users.example.com').services.demo }, env), /different/);
+		assert.equal(
+			inheritedAllowlist(
+				app('users.example.com', 'rate-limit@file').services,
+				env,
+			),
+			null,
+		);
+		assert.throws(
+			() => inheritedAllowlist(app('unknown.example.com').services, env),
+			/Expected one/,
+		);
+		assert.throws(
+			() =>
+				inheritedAllowlist(
+					{ ...app().services, users: app('users.example.com').services.demo },
+					env,
+				),
+			/different/,
+		);
 	});
 	it('fails closed for default allow or rolling updates', () => {
-		assert.throws(() => authEnvironment(config.replace('POLICY: deny', 'POLICY: allow')), /deny/);
-		assert.throws(() => authEnvironment(config.replace('rolling_update: false', 'rolling_update: true')), /recreation/);
+		assert.throws(
+			() => authEnvironment(config.replace('POLICY: deny', 'POLICY: allow')),
+			/deny/,
+		);
+		assert.throws(
+			() =>
+				authEnvironment(
+					config.replace('rolling_update: false', 'rolling_update: true'),
+				),
+			/recreation/,
+		);
 	});
 	it('handles inherited auth, explicit admin, public transitions, and cleanup after a missing stack', async () => {
 		const cwd = process.cwd();
@@ -609,9 +658,23 @@ describe('preview access rules', () => {
 			fs.writeFileSync('apps/tinyauth/docker-compose.yml', config);
 			const run = async (doc, middleware = '') => {
 				fs.writeFileSync('apps/demo/docker-compose.yml', yaml.dump(doc));
-				return deploy(['--app-path', 'apps/demo', '--service-name', 'demo', '--pr-number', '42', '--tag', 'new', '--repo-owner', 'test', '--auth-middleware', middleware]);
+				return deploy([
+					'--app-path',
+					'apps/demo',
+					'--service-name',
+					'demo',
+					'--pr-number',
+					'42',
+					'--tag',
+					'new',
+					'--repo-owner',
+					'test',
+					'--auth-middleware',
+					middleware,
+				]);
 			};
-			const read = () => fs.readFileSync('apps/tinyauth/docker-compose.yml', 'utf8');
+			const read = () =>
+				fs.readFileSync('apps/tinyauth/docker-compose.yml', 'utf8');
 			const key = `TINYAUTH_APPS_${previewId('apps/demo', '42')}_OAUTH_WHITELIST`;
 			await run(app('users.example.com'));
 			assert.equal(authEnvironment(read())[key], usersAllow);

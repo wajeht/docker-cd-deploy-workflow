@@ -9,31 +9,57 @@ export const adminAllow = '${TINYAUTH_ADMIN_ALLOW:?required}';
 export const usersAllow = '${TINYAUTH_USERS_ALLOW:?required}';
 
 export function labelsOf(service) {
-	return Array.isArray(service.labels) ? service.labels : Object.entries(service.labels || {}).map(([key, value]) => `${key}=${value}`);
+	if (Array.isArray(service.labels)) {
+		return service.labels;
+	}
+	return Object.entries(service.labels || {}).map(
+		([key, value]) => `${key}=${value}`,
+	);
 }
 
 export function hasTinyauth(middlewares = '') {
-	return middlewares.split(',').some((value) => ['tinyauth@file', 'tinyauth-no-ratelimit@file'].includes(value.trim()));
+	return middlewares
+		.split(',')
+		.some((value) =>
+			['tinyauth@file', 'tinyauth-no-ratelimit@file'].includes(value.trim()),
+		);
 }
 
 export function usesTinyauth(services) {
-	return Object.values(services || {}).some((service) => labelsOf(service).some((label) => {
-		const match = label.match(/^traefik\.http\.routers\.[^.]+\.middlewares=(.*)$/);
-		return match && hasTinyauth(match[1]);
-	}));
+	for (const service of Object.values(services || {})) {
+		for (const label of labelsOf(service)) {
+			const match = label.match(
+				/^traefik\.http\.routers\.[^.]+\.middlewares=(.*)$/,
+			);
+			if (match && hasTinyauth(match[1])) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 export function isTinyauthPreview(tempPath) {
-	const doc = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'));
+	const doc = yaml.load(
+		fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'),
+	);
 	return usesTinyauth(doc.services);
 }
 
 export function authEnvironment(text) {
 	const doc = yaml.load(text);
 	const env = doc?.services?.tinyauth?.environment;
-	if (!env || Array.isArray(env) || typeof env !== 'object') throw new Error('Tinyauth requires a mapping environment');
-	if (env.TINYAUTH_AUTH_ACLS_POLICY !== 'deny') throw new Error('Tinyauth must deny unknown domains');
-	if (doc['x-docker-cd']?.rolling_update !== false) throw new Error('Tinyauth must use rolling_update: false for environment recreation');
+	if (!env || Array.isArray(env) || typeof env !== 'object') {
+		throw new Error('Tinyauth requires a mapping environment');
+	}
+	if (env.TINYAUTH_AUTH_ACLS_POLICY !== 'deny') {
+		throw new Error('Tinyauth must deny unknown domains');
+	}
+	if (doc['x-docker-cd']?.rolling_update !== false) {
+		throw new Error(
+			'Tinyauth must use rolling_update: false for environment recreation',
+		);
+	}
 	return env;
 }
 
@@ -41,41 +67,78 @@ export function authEnvironment(text) {
 export function inheritedAllowlist(services, env) {
 	const allowlists = new Set();
 	for (const service of Object.values(services)) {
-		const labels = labelsOf(service).filter((label) => !label.includes('redirect'));
+		const labels = labelsOf(service).filter(
+			(label) => !label.includes('redirect'),
+		);
 		for (const label of labels) {
-			const match = label.match(/^traefik\.http\.routers\.([^.]+)\.middlewares=(.*)$/);
-			if (!match || !hasTinyauth(match[2])) continue;
-			const rule = labels.find((value) => value.startsWith(`traefik.http.routers.${match[1]}.rule=`));
-			const hosts = [...(rule || '').matchAll(/Host\(`([^`]+)`\)/g)].map((value) => value[1]);
-			if (!hosts.length) throw new Error('Protected router has no exact Host rule');
+			const match = label.match(
+				/^traefik\.http\.routers\.([^.]+)\.middlewares=(.*)$/,
+			);
+			if (!match || !hasTinyauth(match[2])) {
+				continue;
+			}
+			const rule = labels.find((value) =>
+				value.startsWith(`traefik.http.routers.${match[1]}.rule=`),
+			);
+			const hosts = [...(rule || '').matchAll(/Host\(`([^`]+)`\)/g)].map(
+				(value) => value[1],
+			);
+			if (!hosts.length) {
+				throw new Error('Protected router has no exact Host rule');
+			}
 			for (const host of hosts) {
-				const rules = Object.keys(env).filter((key) => /^TINYAUTH_APPS_.+_CONFIG_DOMAIN$/.test(key) && env[key] === host);
-				if (rules.length !== 1) throw new Error(`Expected one Tinyauth rule for ${host}`);
-				const allow = env[rules[0].replace(/CONFIG_DOMAIN$/, 'OAUTH_WHITELIST')];
-				if (![adminAllow, usersAllow].includes(allow)) throw new Error(`Unsupported Tinyauth allowlist for ${host}`);
+				const rules = Object.keys(env).filter(
+					(key) =>
+						/^TINYAUTH_APPS_.+_CONFIG_DOMAIN$/.test(key) && env[key] === host,
+				);
+				if (rules.length !== 1) {
+					throw new Error(`Expected one Tinyauth rule for ${host}`);
+				}
+				const allow =
+					env[rules[0].replace(/CONFIG_DOMAIN$/, 'OAUTH_WHITELIST')];
+				if (![adminAllow, usersAllow].includes(allow)) {
+					throw new Error(`Unsupported Tinyauth allowlist for ${host}`);
+				}
 				allowlists.add(allow);
 			}
 		}
 	}
-	if (allowlists.size > 1) throw new Error('Preview routers have different Tinyauth allowlists');
+	if (allowlists.size > 1) {
+		throw new Error('Preview routers have different Tinyauth allowlists');
+	}
 	return [...allowlists][0] || null;
 }
 
 export function syncAccess(options, services = {}) {
 	const middleware = options.authMiddleware?.trim();
-	const protectedServices = middleware ? hasTinyauth(middleware) : usesTinyauth(services);
+	let protectedServices = usesTinyauth(services);
+	if (middleware) {
+		protectedServices = hasTinyauth(middleware);
+	}
 	if (!fs.existsSync(authPath)) {
-		if (protectedServices) throw new Error('Tinyauth Compose configuration is missing');
+		if (protectedServices) {
+			throw new Error('Tinyauth Compose configuration is missing');
+		}
 		return;
 	}
 	const text = fs.readFileSync(authPath, 'utf8');
 	const env = authEnvironment(text);
 	let allowlist = null;
-	if (protectedServices) {
-		allowlist = middleware ? adminAllow : inheritedAllowlist(services, env);
+	if (protectedServices && middleware) {
+		allowlist = adminAllow;
+	} else if (protectedServices) {
+		allowlist = inheritedAllowlist(services, env);
 	}
 	const prefix = `TINYAUTH_APPS_${previewId(options.appPath, options.prNumber)}_`;
-	if (allowlist && Object.entries(env).some(([key, value]) => key.endsWith('_CONFIG_DOMAIN') && !key.startsWith(prefix) && value === options.hostname)) {
+	if (
+		allowlist &&
+		Object.entries(env).some(
+			([key, value]) =>
+				key.endsWith('_CONFIG_DOMAIN') &&
+				!key.startsWith(prefix) &&
+				value === options.hostname,
+		)
+	) {
 		throw new Error('Preview hostname already belongs to another rule');
 	}
 	fs.writeFileSync(authPath, updateAccess(text, { ...options, allowlist }));
