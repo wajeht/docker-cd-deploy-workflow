@@ -27,8 +27,14 @@ on:
       auth-middleware:
         type: string
         default: ""
-        description: "Optional Traefik middleware for temp routers (e.g., oauth2-admin@file)"
+        description: "Optional Traefik middleware for temp routers (e.g., tinyauth@file)"
     secrets:
+      DOCKER_CD_URL:
+        required: false
+        description: "HTTPS docker-cd URL; required for Tinyauth previews"
+      DOCKER_CD_API_SECRET:
+        required: false
+        description: "docker-cd API token; required for Tinyauth previews"
       GH_TOKEN:
         required: true
         description: "GitHub PAT with repo and packages access"
@@ -49,6 +55,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.home-ops-repo }}
+          ref: main
+          fetch-depth: 0
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Checkout deploy workflow scripts
@@ -89,7 +97,8 @@ jobs:
       - name: Rewrite compose for temp deploy
         id: rewrite
         run: |
-          node .deploy-workflow/src/temp-compose.js \
+          node .deploy-workflow/src/preview.js \
+            --action create \
             --app-path "${{ inputs.app-path }}" \
             --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \
@@ -100,11 +109,15 @@ jobs:
 
       - name: Commit and push
         run: |
-          node .deploy-workflow/src/git-push.js \
+          node .deploy-workflow/src/git.js \
             --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
+            --paths apps/tinyauth/docker-compose.yml \
             --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
 
       - name: Mark deployment success
+        env:
+          DOCKER_CD_URL: ${{ secrets.DOCKER_CD_URL }}
+          DOCKER_CD_API_SECRET: ${{ secrets.DOCKER_CD_API_SECRET }}
         run: |
           node .deploy-workflow/src/deployment.js \
             --action deploy \
@@ -112,7 +125,9 @@ jobs:
             --repo "${{ github.repository }}" \
             --environment "pr-${{ github.event.pull_request.number }}" \
             --deployment-id "${{ steps.deployment.outputs.deployment-id }}" \
-            --url "${{ steps.rewrite.outputs.url }}"
+            --url "${{ steps.rewrite.outputs.url }}" \
+            --app-path "${{ steps.rewrite.outputs.temp-path }}"
 
       - name: Cleanup workflow scripts
+        if: always()
         run: rm -rf .deploy-workflow .app-repo

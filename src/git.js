@@ -8,11 +8,13 @@ export async function main(argv = process.argv.slice(2)) {
 		args: argv,
 		options: {
 			message: { type: 'string' },
-			paths: { type: 'string' },
+			paths: { type: 'string', multiple: true },
 			all: { type: 'boolean' },
 		},
 	});
-	if (!args['message']) throw new Error('Missing required arg: --message');
+	if (!args['message']) {
+		throw new Error('Missing required arg: --message');
+	}
 	function run(cmd, cmdArgs) {
 		console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
 		return execFileSync(cmd, cmdArgs, { stdio: 'inherit' });
@@ -27,15 +29,26 @@ export async function main(argv = process.argv.slice(2)) {
 	const all = args['all'] === true;
 
 	run('git', ['config', 'user.name', 'github-actions[bot]']);
-	run('git', ['config', 'user.email', 'github-actions[bot]@users.noreply.github.com']);
+	run('git', [
+		'config',
+		'user.email',
+		'github-actions[bot]@users.noreply.github.com',
+	]);
 
 	if (all) {
 		run('git', ['add', '-A']);
 	} else {
-		try {
-			run('git', ['add', paths]);
-		} catch {
-			// path may not exist (already cleaned up), check for staged changes below
+		for (const selectedPath of paths) {
+			try {
+				execFileSync('git', ['add', selectedPath], {
+					stdio: ['ignore', 'pipe', 'pipe'],
+				});
+			} catch (error) {
+				// A missing path is normal after cleanup; do not hide other staging failures.
+				if (!/did not match any files/.test(String(error.stderr))) {
+					throw error;
+				}
+			}
 		}
 	}
 
@@ -58,7 +71,13 @@ export async function main(argv = process.argv.slice(2)) {
 				throw new Error('Push failed after 3 attempts');
 			}
 			console.log(`Push failed (attempt ${i}/3), rebasing...`);
-			run('git', ['pull', '--rebase', 'origin', 'main']);
+			try {
+				run('git', ['pull', '--rebase', 'origin', 'main']);
+			} catch {
+				throw new Error(
+					'Concurrent changes conflict; rerun the workflow from the latest Home Ops main',
+				);
+			}
 		}
 	}
 }

@@ -7,14 +7,25 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import {
+	adminAllow,
+	usersAllow,
+	authEnvironment,
+	inheritedAllowlist,
+	tinyauthRules,
+	main,
 	collectHosts,
 	dependentServices,
 	dependsOnServices,
 	detectHost,
-	rewriteComposeForTempDeploy,
-} from './temp-compose.js';
+	rewriteComposeForPreview,
+	previewId,
+	updateAccess,
+} from './preview.js';
 
-const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'temp-compose.js');
+const scriptPath = path.join(
+	path.dirname(fileURLToPath(import.meta.url)),
+	'preview.js',
+);
 
 describe('collectHosts', () => {
 	it('collects all unique hosts from labels', () => {
@@ -26,7 +37,11 @@ describe('collectHosts', () => {
 				],
 			},
 		};
-		assert.deepStrictEqual(collectHosts(services), ['closepowerlifting.com', 'www.closepowerlifting.com', 'close-powerlifting.jaw.dev']);
+		assert.deepStrictEqual(collectHosts(services), [
+			'closepowerlifting.com',
+			'www.closepowerlifting.com',
+			'close-powerlifting.jaw.dev',
+		]);
 	});
 
 	it('deduplicates hosts', () => {
@@ -122,11 +137,19 @@ describe('detectHost', () => {
 
 describe('dependsOnServices', () => {
 	it('reads list syntax', () => {
-		assert.deepStrictEqual(dependsOnServices({ depends_on: ['db', 'redis'] }), ['db', 'redis']);
+		assert.deepStrictEqual(dependsOnServices({ depends_on: ['db', 'redis'] }), [
+			'db',
+			'redis',
+		]);
 	});
 
 	it('reads condition map syntax', () => {
-		assert.deepStrictEqual(dependsOnServices({ depends_on: { db: { condition: 'service_healthy' } } }), ['db']);
+		assert.deepStrictEqual(
+			dependsOnServices({
+				depends_on: { db: { condition: 'service_healthy' } },
+			}),
+			['db'],
+		);
 	});
 
 	it('ignores missing depends_on', () => {
@@ -136,7 +159,10 @@ describe('dependsOnServices', () => {
 
 describe('dependentServices', () => {
 	it('keeps the app service when there are no dependencies', () => {
-		const selected = dependentServices({ web: { image: 'nginx' }, worker: { image: 'nginx' } }, 'web');
+		const selected = dependentServices(
+			{ web: { image: 'nginx' }, worker: { image: 'nginx' } },
+			'web',
+		);
 
 		assert.deepStrictEqual([...selected].sort(), ['web']);
 	});
@@ -156,13 +182,16 @@ describe('dependentServices', () => {
 	});
 
 	it('returns an empty set when the app service is missing', () => {
-		assert.deepStrictEqual([...dependentServices({ db: { image: 'postgres' } }, 'web')], []);
+		assert.deepStrictEqual(
+			[...dependentServices({ db: { image: 'postgres' } }, 'web')],
+			[],
+		);
 	});
 });
 
-describe('temp-compose', () => {
+describe('preview create', () => {
 	it('uses service-name as the dependency root and router prefix', () => {
-		const result = rewriteComposeForTempDeploy(
+		const result = rewriteComposeForPreview(
 			{
 				services: {
 					api: {
@@ -190,8 +219,14 @@ describe('temp-compose', () => {
 			},
 		);
 
-		assert.deepStrictEqual(Object.keys(result.doc.services).sort(), ['api', 'db']);
-		assert.strictEqual(result.doc.services.api.image, 'ghcr.io/wajeht/example:abc1234');
+		assert.deepStrictEqual(Object.keys(result.doc.services).sort(), [
+			'api',
+			'db',
+		]);
+		assert.strictEqual(
+			result.doc.services.api.image,
+			'ghcr.io/wajeht/example:abc1234',
+		);
 		assert.deepStrictEqual(result.doc.services.api.labels, [
 			'traefik.http.routers.api-pr-42.rule=Host(`pr-42-example.jaw.dev`)',
 			'traefik.http.services.api-pr-42.loadbalancer.server.port=3000',
@@ -200,7 +235,7 @@ describe('temp-compose', () => {
 	});
 
 	it('preserves existing middlewares by default', () => {
-		const result = rewriteComposeForTempDeploy(
+		const result = rewriteComposeForPreview(
 			{
 				services: {
 					bang: {
@@ -232,7 +267,7 @@ describe('temp-compose', () => {
 	});
 
 	it('rewrites router names that differ from service-name', () => {
-		const result = rewriteComposeForTempDeploy(
+		const result = rewriteComposeForPreview(
 			{
 				services: {
 					www: {
@@ -265,7 +300,7 @@ describe('temp-compose', () => {
 	});
 
 	it('replaces existing router middlewares when auth-middleware is set', () => {
-		const result = rewriteComposeForTempDeploy(
+		const result = rewriteComposeForPreview(
 			{
 				services: {
 					bang: {
@@ -298,7 +333,7 @@ describe('temp-compose', () => {
 	});
 
 	it('adds router middlewares when auth-middleware is set and no middleware label exists', () => {
-		const result = rewriteComposeForTempDeploy(
+		const result = rewriteComposeForPreview(
 			{
 				services: {
 					demo: {
@@ -330,7 +365,7 @@ describe('temp-compose', () => {
 	});
 
 	it('applies auth-middleware to each rewritten router on the service', () => {
-		const result = rewriteComposeForTempDeploy(
+		const result = rewriteComposeForPreview(
 			{
 				services: {
 					homeassistant: {
@@ -365,7 +400,7 @@ describe('temp-compose', () => {
 	});
 
 	it('ignores blank auth-middleware values', () => {
-		const result = rewriteComposeForTempDeploy(
+		const result = rewriteComposeForPreview(
 			{
 				services: {
 					bang: {
@@ -396,7 +431,7 @@ describe('temp-compose', () => {
 	it('fails when service-name is not present', () => {
 		assert.throws(
 			() =>
-				rewriteComposeForTempDeploy(
+				rewriteComposeForPreview(
 					{ services: { web: { image: 'nginx' } } },
 					{
 						appName: 'example',
@@ -411,7 +446,9 @@ describe('temp-compose', () => {
 	});
 
 	it('keeps the app service and its dependencies only', () => {
-		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'));
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
+		);
 		const appPath = path.join(tempDir, 'apps', 'demo');
 		const tempPath = `${appPath}-pr-42`;
 
@@ -461,6 +498,8 @@ describe('temp-compose', () => {
 
 			execFileSync('node', [
 				scriptPath,
+				'--action',
+				'create',
 				'--app-path',
 				appPath,
 				'--service-name',
@@ -473,23 +512,47 @@ describe('temp-compose', () => {
 				'wajeht',
 			]);
 
-			const rewritten = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'));
+			const rewritten = yaml.load(
+				fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'),
+			);
 
-			assert.deepStrictEqual(rewritten['x-docker-cd'], { rolling_update: false });
-			assert.deepStrictEqual(Object.keys(rewritten.services).sort(), ['demo', 'demo-db']);
-			assert.strictEqual(rewritten.services.demo.image, 'ghcr.io/wajeht/demo:abc1234');
-			assert.strictEqual(rewritten.services['demo-db'].container_name, undefined);
-			assert.deepStrictEqual(Object.keys(rewritten.networks).sort(), ['internal', 'traefik']);
+			assert.deepStrictEqual(rewritten['x-docker-cd'], {
+				rolling_update: false,
+			});
+			assert.deepStrictEqual(Object.keys(rewritten.services).sort(), [
+				'demo',
+				'demo-db',
+			]);
+			assert.strictEqual(
+				rewritten.services.demo.image,
+				'ghcr.io/wajeht/demo:abc1234',
+			);
+			assert.strictEqual(
+				rewritten.services['demo-db'].container_name,
+				undefined,
+			);
+			assert.deepStrictEqual(Object.keys(rewritten.networks).sort(), [
+				'internal',
+				'traefik',
+			]);
 			assert.deepStrictEqual(Object.keys(rewritten.volumes), ['db']);
-			assert.strictEqual(rewritten.services.demo.labels[1], 'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)');
-			assert.strictEqual(fs.existsSync(path.join(tempPath, 'docker-cd.yml')), false);
+			assert.strictEqual(
+				rewritten.services.demo.labels[1],
+				'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)',
+			);
+			assert.strictEqual(
+				fs.existsSync(path.join(tempPath, 'docker-cd.yml')),
+				false,
+			);
 		} finally {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
 	it('passes auth-middleware through the CLI', () => {
-		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'));
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
+		);
 		const appPath = path.join(tempDir, 'apps', 'demo');
 		const tempPath = `${appPath}-pr-42`;
 
@@ -513,6 +576,8 @@ describe('temp-compose', () => {
 
 			execFileSync('node', [
 				scriptPath,
+				'--action',
+				'create',
 				'--app-path',
 				appPath,
 				'--service-name',
@@ -527,7 +592,9 @@ describe('temp-compose', () => {
 				'oauth2-admin@file',
 			]);
 
-			const rewritten = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'));
+			const rewritten = yaml.load(
+				fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'),
+			);
 
 			assert.deepStrictEqual(rewritten.services.demo.labels, [
 				'traefik.http.routers.demo-pr-42.rule=Host(`pr-42-demo.jaw.dev`)',
@@ -537,5 +604,264 @@ describe('temp-compose', () => {
 		} finally {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
+	});
+});
+
+const config = `x-docker-cd:
+  rolling_update: false
+services:
+  tinyauth:
+    # lint-ignore: backup
+    image: tinyauth:v5
+    environment:
+      TINYAUTH_AUTH_ACLS_POLICY: deny
+      TINYAUTH_APPS_ADMIN_CONFIG_DOMAIN: admin.example.com
+      TINYAUTH_APPS_ADMIN_OAUTH_WHITELIST: \${TINYAUTH_ADMIN_ALLOW:?required}
+      TINYAUTH_APPS_USERS_CONFIG_DOMAIN: users.example.com
+      TINYAUTH_APPS_USERS_OAUTH_WHITELIST: \${TINYAUTH_USERS_ALLOW:?required}
+      TZ: America/Chicago
+`;
+const options = {
+	appPath: 'apps/demo',
+	prNumber: '42',
+	hostname: 'pr-42-demo.example.com',
+	allowlist: adminAllow,
+};
+const app = (host = 'admin.example.com', middleware = 'tinyauth@file') => ({
+	services: {
+		demo: {
+			image: 'ghcr.io/test/demo:old',
+			labels: [
+				`traefik.http.routers.demo.rule=Host(\`${host}\`)`,
+				`traefik.http.routers.demo.middlewares=${middleware}`,
+			],
+		},
+	},
+});
+
+describe('preview access rules', () => {
+	it('registers exactly one OAuth rule and preserves all production text', () => {
+		const result = updateAccess(config, options);
+		const env = authEnvironment(result);
+		const id = previewId(options.appPath, options.prNumber);
+		assert.equal(env[`TINYAUTH_APPS_${id}_CONFIG_DOMAIN`], options.hostname);
+		assert.equal(env[`TINYAUTH_APPS_${id}_OAUTH_WHITELIST`], adminAllow);
+		assert.equal(updateAccess(result, { ...options, allowlist: null }), config);
+		assert.equal(updateAccess(result, options), result);
+		assert.ok(!result.includes('BASICAUTH'));
+	});
+	it('removes only the owned rule and rejects an unowned collision', () => {
+		const other = {
+			...options,
+			prNumber: '43',
+			hostname: 'pr-43-demo.example.com',
+		};
+		const second = updateAccess(config, other);
+		const both = updateAccess(second, options);
+		assert.equal(updateAccess(both, { ...options, allowlist: null }), second);
+		const unowned = updateAccess(config, options).replace(
+			options.hostname,
+			'production.example.com',
+		);
+		assert.throws(() => updateAccess(unowned, options), /unowned/);
+	});
+	it('inherits admin and users allowlists, including middleware chains and map labels', () => {
+		const env = authEnvironment(config);
+		assert.equal(
+			inheritedAllowlist(tinyauthRules(app().services), env),
+			adminAllow,
+		);
+		const users = app(
+			'users.example.com',
+			'rate-limit@file,tinyauth-no-ratelimit@file',
+		);
+		users.services.demo.labels = Object.fromEntries(
+			users.services.demo.labels.map((label) => label.split('=')),
+		);
+		assert.equal(
+			inheritedAllowlist(tinyauthRules(users.services), env),
+			usersAllow,
+		);
+		assert.equal(
+			inheritedAllowlist(
+				tinyauthRules(app('users.example.com', 'rate-limit@file').services),
+				env,
+			),
+			null,
+		);
+		assert.throws(
+			() =>
+				inheritedAllowlist(
+					tinyauthRules(app('unknown.example.com').services),
+					env,
+				),
+			/Expected one/,
+		);
+		assert.throws(
+			() =>
+				inheritedAllowlist(
+					tinyauthRules({
+						...app().services,
+						users: app('users.example.com').services.demo,
+					}),
+					env,
+				),
+			/different/,
+		);
+	});
+	it('fails closed for default allow or rolling updates', () => {
+		assert.throws(
+			() => authEnvironment(config.replace('POLICY: deny', 'POLICY: allow')),
+			/deny/,
+		);
+		assert.throws(
+			() =>
+				authEnvironment(
+					config.replace('rolling_update: false', 'rolling_update: true'),
+				),
+			/recreation/,
+		);
+	});
+	it('handles inherited auth, explicit admin, public transitions, and cleanup after a missing stack', async () => {
+		const cwd = process.cwd();
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-access-'));
+		try {
+			process.chdir(dir);
+			fs.mkdirSync('apps/tinyauth', { recursive: true });
+			fs.mkdirSync('apps/demo', { recursive: true });
+			fs.writeFileSync('apps/tinyauth/docker-compose.yml', config);
+			const run = async (doc, middleware = '') => {
+				fs.writeFileSync('apps/demo/docker-compose.yml', yaml.dump(doc));
+				return main([
+					'--action',
+					'create',
+					'--app-path',
+					'apps/demo',
+					'--service-name',
+					'demo',
+					'--pr-number',
+					'42',
+					'--tag',
+					'new',
+					'--repo-owner',
+					'test',
+					'--auth-middleware',
+					middleware,
+				]);
+			};
+			const read = () =>
+				fs.readFileSync('apps/tinyauth/docker-compose.yml', 'utf8');
+			const key = `TINYAUTH_APPS_${previewId('apps/demo', '42')}_OAUTH_WHITELIST`;
+			await run(app('users.example.com'));
+			assert.equal(authEnvironment(read())[key], usersAllow);
+			await run(app('users.example.com'), 'tinyauth@file');
+			assert.equal(authEnvironment(read())[key], adminAllow);
+			await run(app('users.example.com', 'rate-limit@file'));
+			assert.equal(read(), config);
+			await run(app('users.example.com', 'rate-limit@file'), 'tinyauth@file');
+			fs.rmSync('apps/demo-pr-42', { recursive: true });
+			await main([
+				'--action',
+				'cleanup',
+				'--app-path',
+				'apps/demo',
+				'--pr-number',
+				'42',
+			]);
+			await main([
+				'--action',
+				'cleanup',
+				'--app-path',
+				'apps/demo',
+				'--pr-number',
+				'42',
+			]);
+			assert.equal(read(), config);
+			fs.rmSync('apps/tinyauth', { recursive: true });
+			await assert.rejects(() => run(app()), /missing/);
+		} finally {
+			process.chdir(cwd);
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe('preview cleanup', () => {
+	it('removes the matching temp stack', async () => {
+		const dir = fs.mkdtempSync(
+			path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
+		);
+		const appPath = path.join(dir, 'apps', 'demo');
+		const tempPath = `${appPath}-pr-42`;
+
+		try {
+			fs.mkdirSync(tempPath, { recursive: true });
+			fs.writeFileSync(
+				path.join(tempPath, 'docker-compose.yml'),
+				'services: {}\n',
+			);
+
+			execFileSync(process.execPath, [
+				scriptPath,
+				'--action',
+				'cleanup',
+				'--app-path',
+				appPath,
+				'--pr-number',
+				'42',
+			]);
+
+			assert.strictEqual(fs.existsSync(tempPath), false);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('does nothing when the temp stack is already gone', async () => {
+		const dir = fs.mkdtempSync(
+			path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
+		);
+		const appPath = path.join(dir, 'apps', 'demo');
+
+		try {
+			await main([
+				'--action',
+				'cleanup',
+				'--app-path',
+				appPath,
+				'--pr-number',
+				'42',
+			]);
+
+			assert.strictEqual(fs.existsSync(`${appPath}-pr-42`), false);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe('preview CLI', () => {
+	it('validates the action and creation-only arguments', async () => {
+		await assert.rejects(() => main([]), /action must be create or cleanup/);
+		await assert.rejects(
+			() => main(['--action', 'invalid']),
+			/action must be create or cleanup/,
+		);
+		await assert.rejects(
+			() =>
+				main([
+					'--action',
+					'create',
+					'--app-path',
+					'apps/demo',
+					'--pr-number',
+					'42',
+				]),
+			/service-name/,
+		);
+		await assert.rejects(
+			() => main(['--action', 'cleanup', '--app-path', 'apps/demo']),
+			/pr-number/,
+		);
 	});
 });

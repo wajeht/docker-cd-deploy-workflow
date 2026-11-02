@@ -2,12 +2,16 @@
 
 `deploy.yaml` updates one service image tag in home-ops and tracks it as a GitHub Deployment. The image is resolved from ghcr.io and written as `<tag>@sha256:<digest>`.
 
+`image.js` updates the Compose image and `git.js` commits it. Production tracking uses the workflow's native `environment: production`.
+
 ## Usage
+
+Replace `RELEASE_COMMIT` with the released workflow commit. Follow [release coordination](reference.md#release-coordination) when changing caller pins.
 
 ```yaml
 jobs:
   deploy:
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.26
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@RELEASE_COMMIT
     with:
       app-path: apps/your-app
       service-name: your-app
@@ -21,7 +25,7 @@ With a custom URL:
 ```yaml
 jobs:
   deploy:
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.26
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@RELEASE_COMMIT
     with:
       app-path: apps/close-powerlifting
       service-name: close-powerlifting
