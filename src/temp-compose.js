@@ -16,6 +16,18 @@ export function hasTinyauth(middlewares = '') {
 	return middlewares.split(',').some((value) => ['tinyauth@file', 'tinyauth-no-ratelimit@file'].includes(value.trim()));
 }
 
+export function usesTinyauth(services) {
+	return Object.values(services || {}).some((service) => labelsOf(service).some((label) => {
+		const match = label.match(/^traefik\.http\.routers\.[^.]+\.middlewares=(.*)$/);
+		return match && hasTinyauth(match[1]);
+	}));
+}
+
+export function isTinyauthPreview(tempPath) {
+	const doc = yaml.load(fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'));
+	return usesTinyauth(doc.services);
+}
+
 export function authEnvironment(text) {
 	const doc = yaml.load(text);
 	const env = doc?.services?.tinyauth?.environment;
@@ -50,20 +62,23 @@ export function inheritedAllowlist(services, env) {
 }
 
 export function syncAccess(options, services = {}) {
-	const protectedServices = Object.values(services).some((service) => labelsOf(service).some((label) => /\.middlewares=/.test(label) && hasTinyauth(label.split('=').slice(1).join('='))));
+	const middleware = options.authMiddleware?.trim();
+	const protectedServices = middleware ? hasTinyauth(middleware) : usesTinyauth(services);
 	if (!fs.existsSync(authPath)) {
-		if (protectedServices || hasTinyauth(options.authMiddleware)) throw new Error('Tinyauth Compose configuration is missing');
-		return false;
+		if (protectedServices) throw new Error('Tinyauth Compose configuration is missing');
+		return;
 	}
 	const text = fs.readFileSync(authPath, 'utf8');
 	const env = authEnvironment(text);
-	const allowlist = hasTinyauth(options.authMiddleware) ? adminAllow : inheritedAllowlist(services, env);
+	let allowlist = null;
+	if (protectedServices) {
+		allowlist = middleware ? adminAllow : inheritedAllowlist(services, env);
+	}
 	const prefix = `TINYAUTH_APPS_${previewId(options.appPath, options.prNumber)}_`;
 	if (allowlist && Object.entries(env).some(([key, value]) => key.endsWith('_CONFIG_DOMAIN') && !key.startsWith(prefix) && value === options.hostname)) {
 		throw new Error('Preview hostname already belongs to another rule');
 	}
 	fs.writeFileSync(authPath, updateAccess(text, { ...options, allowlist }));
-	return true;
 }
 
 export function collectHosts(services) {
@@ -234,7 +249,8 @@ export function rewriteComposeForTempDeploy(doc, options) {
 		}
 	}
 
-	const originalHost = detectHost(rewritten.services);
+	const sourceServices = structuredClone(rewritten.services);
+	const originalHost = detectHost(sourceServices);
 	if (!originalHost) {
 		throw new Error('Could not detect domain from traefik Host() labels');
 	}
@@ -297,7 +313,7 @@ export function rewriteComposeForTempDeploy(doc, options) {
 		}
 	}
 
-	return { doc: rewritten, hostname, url: `https://${hostname}`, messages };
+	return { doc: rewritten, sourceServices, hostname, url: `https://${hostname}`, messages };
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -340,13 +356,7 @@ export async function main(argv = process.argv.slice(2)) {
 	const composePath = path.join(tempPath, 'docker-compose.yml');
 	const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
 	const result = rewriteComposeForTempDeploy(doc, { appName, serviceName, tag, prNumber, repoOwner, authMiddleware });
-	const selected = dependentServices(doc.services, serviceName);
-	const services = Object.fromEntries(Object.entries(doc.services).filter(([name]) => selected.has(name)));
-	// An explicit override replaces inherited middleware, including a switch to public mode.
-	if (authMiddleware?.trim()) {
-		for (const service of Object.values(services)) service.labels = applyAuthMiddleware(labelsOf(service), authMiddleware);
-	}
-	syncAccess({ appPath, prNumber, hostname: result.hostname, authMiddleware }, services);
+	syncAccess({ appPath, prNumber, hostname: result.hostname, authMiddleware }, result.sourceServices);
 	for (const message of result.messages) {
 		console.log(message);
 	}

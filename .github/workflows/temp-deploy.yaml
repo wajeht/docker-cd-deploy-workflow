@@ -110,6 +110,7 @@ jobs:
         run: |
           node .deploy-workflow/src/git-push.js \
             --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
+            --paths apps/tinyauth/docker-compose.yml \
             --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
 
       - name: Mark deployment success

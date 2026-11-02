@@ -1,7 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import fs from 'node:fs';
-import { authPath } from './temp-cleanup.js';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -10,7 +8,7 @@ export async function main(argv = process.argv.slice(2)) {
 		args: argv,
 		options: {
 			message: { type: 'string' },
-			paths: { type: 'string' },
+			paths: { type: 'string', multiple: true },
 			all: { type: 'boolean' },
 		},
 	});
@@ -34,14 +32,13 @@ export async function main(argv = process.argv.slice(2)) {
 	if (all) {
 		run('git', ['add', '-A']);
 	} else {
-		try {
-			execFileSync('git', ['add', paths], { stdio: ['ignore', 'pipe', 'pipe'] });
-		} catch (error) {
-			// A missing path is normal after cleanup; do not hide other staging failures.
-			if (!/did not match any files/.test(String(error.stderr))) throw error;
-		}
-		if (/-pr-\d+$/.test(paths) && fs.existsSync(authPath)) {
-			run('git', ['add', authPath]);
+		for (const selectedPath of paths) {
+			try {
+				execFileSync('git', ['add', selectedPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+			} catch (error) {
+				// A missing path is normal after cleanup; do not hide other staging failures.
+				if (!/did not match any files/.test(String(error.stderr))) throw error;
+			}
 		}
 	}
 

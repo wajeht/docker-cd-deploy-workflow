@@ -63,18 +63,32 @@ function git(args) {
 export function deployedRevisionMatches(expected, actual, tempPath, auth = false) {
 	if (!/^[a-f0-9]{40}$/.test(actual || '')) return false;
 	try {
-		try { git(['cat-file', '-e', actual]); } catch { git(['fetch', 'origin', 'main']); }
+		try {
+			git(['cat-file', '-e', actual]);
+		} catch {
+			git(['fetch', 'origin', 'main']);
+		}
 		git(['merge-base', '--is-ancestor', expected, actual]);
 		if (!auth) return git(['diff', '--name-only', expected, actual, '--', tempPath]) === '';
 		const [, app, pr] = path.basename(tempPath).match(/^(.+)-pr-([0-9]+)$/);
-		const prefix = `TINYAUTH_APPS_${previewId(app, pr)}_`;
-		const rule = (ref) => git(['show', `${ref}:${authPath}`]).split('\n').filter((line) => line.includes(prefix)).sort().join('\n');
-		return rule(expected) === rule(actual);
-	} catch { return false; }
+		const ownId = previewId(app, pr);
+		const settings = (ref) => git(['show', `${ref}:${authPath}`]).replace(
+			/^      # preview-access:(PREVIEW[A-F0-9]+):start\n[\s\S]*?^      # preview-access:\1:end\n/gm,
+			(block, id) => id === ownId ? block : '',
+		);
+		// Other previews may change; our rule and the rest of Tinyauth must still match.
+		return settings(expected) === settings(actual);
+	} catch {
+		return false;
+	}
 }
 
-export async function waitForTinyauth(tempPath, { attempts = 60, pause = () => new Promise((resolve) => setTimeout(resolve, 10000)), matches = deployedRevisionMatches } = {}) {
-	const api = new URL(process.env.DOCKER_CD_URL);
+export async function waitForTinyauth(tempPath, {
+	attempts = 60,
+	pause = () => new Promise((resolve) => setTimeout(resolve, 10000)),
+	matches = deployedRevisionMatches,
+} = {}) {
+	const api = new URL(process.env.DOCKER_CD_URL || 'http://missing');
 	if (api.protocol !== 'https:' || api.username || api.password || !process.env.DOCKER_CD_API_SECRET) {
 		throw new Error('Tinyauth previews require HTTPS DOCKER_CD_URL and DOCKER_CD_API_SECRET');
 	}
@@ -93,10 +107,10 @@ export async function waitForTinyauth(tempPath, { attempts = 60, pause = () => n
 				if (!res.ok) continue;
 				const { success, data } = await res.json();
 				const health = data?.health;
-				if (success && data.sync === 'synced' && data.lastDeploy?.status === 'synced' &&
-					health?.total > 0 && health.running === health.total && health.starting === 0 && health.unhealthy === 0 &&
-					(project !== 'tinyauth' || health.healthy === health.total) &&
-					matches(expected, data.lastDeploy.commitSHA, tempPath, project === 'tinyauth')) ready++;
+				if (!success || data?.sync !== 'synced' || data.lastDeploy?.status !== 'synced') continue;
+				if (!health?.total || health.running !== health.total || health.starting !== 0 || health.unhealthy !== 0) continue;
+				if (project === 'tinyauth' && health.healthy !== health.total) continue;
+				if (matches(expected, data.lastDeploy.commitSHA, tempPath, project === 'tinyauth')) ready++;
 			} catch (error) {
 				if (error.message === 'docker-cd API authentication failed') throw error;
 			}
@@ -116,8 +130,14 @@ async function markDeploymentSuccess(githubApi, args) {
 		throw new Error('--url and --deployment-id are required for deploy action');
 	}
 
+	let protectedPreview = false;
+	if (args['app-path']) {
+		const { isTinyauthPreview } = await import('./temp-compose.js');
+		protectedPreview = isTinyauthPreview(args['app-path']);
+	}
+
 	let description;
-	if (args['app-path'] && /middlewares.*tinyauth(?:-no-ratelimit)?@file/.test(fs.readFileSync(path.join(args['app-path'], 'docker-compose.yml'), 'utf8'))) {
+	if (protectedPreview) {
 		try {
 			await waitForTinyauth(args['app-path']);
 		} catch (error) {
