@@ -37,6 +37,24 @@ function withFetch(t, fetch) {
 	});
 }
 
+function withDockerCd(t) {
+	const values = {
+		DOCKER_CD_URL: 'https://cd.example.com',
+		DOCKER_CD_API_SECRET: 'test',
+	};
+	for (const [key, value] of Object.entries(values)) {
+		const previous = process.env[key];
+		process.env[key] = value;
+		t.after(() => {
+			if (previous === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = previous;
+			}
+		});
+	}
+}
+
 function withGithubOutput(t) {
 	const previous = process.env.GITHUB_OUTPUT;
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'));
@@ -183,22 +201,7 @@ describe('deployment', () => {
 	});
 
 	it('checks deployed state instead of accepting a login page', async (t) => {
-		const oldUrl = process.env.DOCKER_CD_URL;
-		const oldSecret = process.env.DOCKER_CD_API_SECRET;
-		process.env.DOCKER_CD_URL = 'https://cd.example.com';
-		process.env.DOCKER_CD_API_SECRET = 'test';
-		t.after(() => {
-			if (oldUrl === undefined) {
-				delete process.env.DOCKER_CD_URL;
-			} else {
-				process.env.DOCKER_CD_URL = oldUrl;
-			}
-			if (oldSecret === undefined) {
-				delete process.env.DOCKER_CD_API_SECRET;
-			} else {
-				process.env.DOCKER_CD_API_SECRET = oldSecret;
-			}
-		});
+		withDockerCd(t);
 		const ready = {
 			sync: 'synced',
 			lastDeploy: { status: 'synced', commitSHA: 'a'.repeat(40) },
@@ -243,23 +246,8 @@ describe('deployment', () => {
 
 	it('parses folded middleware labels and records protected deployment failures', async (t) => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-readiness-'));
-		const oldUrl = process.env.DOCKER_CD_URL;
-		const oldSecret = process.env.DOCKER_CD_API_SECRET;
-		process.env.DOCKER_CD_URL = 'https://cd.example.com';
-		process.env.DOCKER_CD_API_SECRET = 'test';
-		t.after(() => {
-			fs.rmSync(dir, { recursive: true, force: true });
-			if (oldUrl === undefined) {
-				delete process.env.DOCKER_CD_URL;
-			} else {
-				process.env.DOCKER_CD_URL = oldUrl;
-			}
-			if (oldSecret === undefined) {
-				delete process.env.DOCKER_CD_API_SECRET;
-			} else {
-				process.env.DOCKER_CD_API_SECRET = oldSecret;
-			}
-		});
+		withDockerCd(t);
+		t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 		fs.writeFileSync(
 			path.join(dir, 'docker-compose.yml'),
 			`services:

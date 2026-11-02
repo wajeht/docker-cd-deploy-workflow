@@ -25,25 +25,33 @@ export function hasTinyauth(middlewares = '') {
 		);
 }
 
-export function usesTinyauth(services) {
+export function tinyauthRules(services) {
+	const rules = [];
 	for (const service of Object.values(services || {})) {
-		for (const label of labelsOf(service)) {
-			const match = label.match(
-				/^traefik\.http\.routers\.[^.]+\.middlewares=(.*)$/,
+		const labels = labelsOf(service).filter(
+			(label) => !label.includes('redirect'),
+		);
+		for (const label of labels) {
+			const router = label.match(
+				/^traefik\.http\.routers\.([^.]+)\.middlewares=(.*)$/,
 			);
-			if (match && hasTinyauth(match[1])) {
-				return true;
+			if (router && hasTinyauth(router[2])) {
+				rules.push(
+					labels.find((value) =>
+						value.startsWith(`traefik.http.routers.${router[1]}.rule=`),
+					) || '',
+				);
 			}
 		}
 	}
-	return false;
+	return rules;
 }
 
 export function isTinyauthPreview(tempPath) {
 	const doc = yaml.load(
 		fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'),
 	);
-	return usesTinyauth(doc.services);
+	return tinyauthRules(doc.services).length > 0;
 }
 
 export function authEnvironment(text) {
@@ -64,43 +72,26 @@ export function authEnvironment(text) {
 }
 
 // One preview hostname cannot represent two different access policies safely.
-export function inheritedAllowlist(services, env) {
+export function inheritedAllowlist(rules, env) {
 	const allowlists = new Set();
-	for (const service of Object.values(services)) {
-		const labels = labelsOf(service).filter(
-			(label) => !label.includes('redirect'),
-		);
-		for (const label of labels) {
-			const match = label.match(
-				/^traefik\.http\.routers\.([^.]+)\.middlewares=(.*)$/,
-			);
-			if (!match || !hasTinyauth(match[2])) {
-				continue;
+	for (const rule of rules) {
+		const hosts = [...rule.matchAll(/Host\(`([^`]+)`\)/g)];
+		if (!hosts.length) {
+			throw new Error('Protected router has no exact Host rule');
+		}
+		for (const [, host] of hosts) {
+			const keys = Object.keys(env).filter((key) => {
+				return key.endsWith('_CONFIG_DOMAIN') && env[key] === host;
+			});
+			if (keys.length !== 1) {
+				throw new Error(`Expected one Tinyauth rule for ${host}`);
 			}
-			const rule = labels.find((value) =>
-				value.startsWith(`traefik.http.routers.${match[1]}.rule=`),
-			);
-			const hosts = [...(rule || '').matchAll(/Host\(`([^`]+)`\)/g)].map(
-				(value) => value[1],
-			);
-			if (!hosts.length) {
-				throw new Error('Protected router has no exact Host rule');
+			const allowlist =
+				env[keys[0].replace('CONFIG_DOMAIN', 'OAUTH_WHITELIST')];
+			if (![adminAllow, usersAllow].includes(allowlist)) {
+				throw new Error(`Unsupported Tinyauth allowlist for ${host}`);
 			}
-			for (const host of hosts) {
-				const rules = Object.keys(env).filter(
-					(key) =>
-						/^TINYAUTH_APPS_.+_CONFIG_DOMAIN$/.test(key) && env[key] === host,
-				);
-				if (rules.length !== 1) {
-					throw new Error(`Expected one Tinyauth rule for ${host}`);
-				}
-				const allow =
-					env[rules[0].replace(/CONFIG_DOMAIN$/, 'OAUTH_WHITELIST')];
-				if (![adminAllow, usersAllow].includes(allow)) {
-					throw new Error(`Unsupported Tinyauth allowlist for ${host}`);
-				}
-				allowlists.add(allow);
-			}
+			allowlists.add(allowlist);
 		}
 	}
 	if (allowlists.size > 1) {
@@ -109,9 +100,9 @@ export function inheritedAllowlist(services, env) {
 	return [...allowlists][0] || null;
 }
 
-export function syncAccess(options, services = {}) {
+export function syncAccess(options, rules = []) {
 	const middleware = options.authMiddleware?.trim();
-	let protectedServices = usesTinyauth(services);
+	let protectedServices = rules.length > 0;
 	if (middleware) {
 		protectedServices = hasTinyauth(middleware);
 	}
@@ -127,7 +118,7 @@ export function syncAccess(options, services = {}) {
 	if (protectedServices && middleware) {
 		allowlist = adminAllow;
 	} else if (protectedServices) {
-		allowlist = inheritedAllowlist(services, env);
+		allowlist = inheritedAllowlist(rules, env);
 	}
 	const prefix = `TINYAUTH_APPS_${previewId(options.appPath, options.prNumber)}_`;
 	if (
@@ -312,8 +303,8 @@ export function rewriteComposeForTempDeploy(doc, options) {
 		}
 	}
 
-	const sourceServices = structuredClone(rewritten.services);
-	const originalHost = detectHost(sourceServices);
+	const authRules = tinyauthRules(rewritten.services);
+	const originalHost = detectHost(rewritten.services);
 	if (!originalHost) {
 		throw new Error('Could not detect domain from traefik Host() labels');
 	}
@@ -376,7 +367,7 @@ export function rewriteComposeForTempDeploy(doc, options) {
 		}
 	}
 
-	return { doc: rewritten, sourceServices, hostname, url: `https://${hostname}`, messages };
+	return { doc: rewritten, authRules, hostname, url: `https://${hostname}`, messages };
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -419,7 +410,7 @@ export async function main(argv = process.argv.slice(2)) {
 	const composePath = path.join(tempPath, 'docker-compose.yml');
 	const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
 	const result = rewriteComposeForTempDeploy(doc, { appName, serviceName, tag, prNumber, repoOwner, authMiddleware });
-	syncAccess({ appPath, prNumber, hostname: result.hostname, authMiddleware }, result.sourceServices);
+	syncAccess({ appPath, prNumber, hostname: result.hostname, authMiddleware }, result.authRules);
 	for (const message of result.messages) {
 		console.log(message);
 	}

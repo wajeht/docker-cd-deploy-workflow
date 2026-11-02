@@ -85,12 +85,17 @@ export function deployedRevisionMatches(
 			);
 		}
 		const [, app, pr] = path.basename(tempPath).match(/^(.+)-pr-([0-9]+)$/);
-		const ownId = previewId(app, pr);
+		const ownKey = `TINYAUTH_APPS_${previewId(app, pr)}_`;
 		const settings = (ref) =>
-			git(['show', `${ref}:${authPath}`]).replace(
-				/^      # preview-access:(PREVIEW[A-F0-9]+):start\n[\s\S]*?^      # preview-access:\1:end\n/gm,
-				(block, id) => (id === ownId ? block : ''),
-			);
+			git(['show', `${ref}:${authPath}`])
+				.split('\n')
+				.filter((line) => {
+					return (
+						!line.trim().startsWith('TINYAUTH_APPS_PREVIEW') ||
+						line.trim().startsWith(ownKey)
+					);
+				})
+				.join('\n');
 		// Other previews may change; our rule and the rest of Tinyauth must still match.
 		return settings(expected) === settings(actual);
 	} catch {
@@ -102,89 +107,78 @@ export async function waitForTinyauth(
 	tempPath,
 	{
 		attempts = 60,
-		pause = () => new Promise((resolve) => setTimeout(resolve, 10000)),
 		matches = deployedRevisionMatches,
 	} = {},
 ) {
-	const api = new URL(process.env.DOCKER_CD_URL || 'http://missing');
-	if (
-		api.protocol !== 'https:' ||
-		api.username ||
-		api.password ||
-		!process.env.DOCKER_CD_API_SECRET
-	) {
+	const apiUrl = process.env.DOCKER_CD_URL;
+	const token = process.env.DOCKER_CD_API_SECRET;
+	if (!apiUrl || !token) {
 		throw new Error(
-			'Tinyauth previews require HTTPS DOCKER_CD_URL and DOCKER_CD_API_SECRET',
+			'Tinyauth previews require DOCKER_CD_URL and DOCKER_CD_API_SECRET',
 		);
 	}
+	const api = new URL(apiUrl);
+	if (api.protocol !== 'https:' || api.username || api.password) {
+		throw new Error('DOCKER_CD_URL must use HTTPS without URL credentials');
+	}
 	const expected = git(['rev-parse', 'HEAD']);
-	const projects = ['tinyauth', path.basename(tempPath)];
+
+	async function projectReady(project) {
+		try {
+			const response = await fetch(
+				new URL(`/api/projects/${encodeURIComponent(project)}`, api),
+				{
+					headers: { Authorization: `Bearer ${token}` },
+					redirect: 'error',
+					signal: AbortSignal.timeout(5000),
+				},
+			);
+			if (response.status === 401 || response.status === 403) {
+				throw new Error('docker-cd API authentication failed');
+			}
+			if (!response.ok) {
+				return false;
+			}
+			const { success, data } = await response.json();
+			const health = data?.health;
+			return (
+				success &&
+				data?.sync === 'synced' &&
+				data.lastDeploy?.status === 'synced' &&
+				health?.total > 0 &&
+				health.running === health.total &&
+				health.starting === 0 &&
+				health.unhealthy === 0 &&
+				(project !== 'tinyauth' || health.healthy === health.total) &&
+				matches(
+					expected,
+					data.lastDeploy.commitSHA,
+					tempPath,
+					project === 'tinyauth',
+				)
+			);
+		} catch (error) {
+			if (error.message === 'docker-cd API authentication failed') {
+				throw error;
+			}
+			return false;
+		}
+	}
+
 	const deadline = Date.now() + 600000;
 	for (
 		let attempt = 0;
 		attempt < attempts && Date.now() < deadline;
 		attempt++
 	) {
-		let ready = 0;
-		for (const project of projects) {
-			try {
-				const res = await fetch(
-					new URL(`/api/projects/${encodeURIComponent(project)}`, api),
-					{
-						headers: {
-							Authorization: `Bearer ${process.env.DOCKER_CD_API_SECRET}`,
-						},
-						redirect: 'error',
-						signal: AbortSignal.timeout(5000),
-					},
-				);
-				if (res.status === 401 || res.status === 403) {
-					throw new Error('docker-cd API authentication failed');
-				}
-				if (!res.ok) {
-					continue;
-				}
-				const { success, data } = await res.json();
-				const health = data?.health;
-				if (
-					!success ||
-					data?.sync !== 'synced' ||
-					data.lastDeploy?.status !== 'synced'
-				) {
-					continue;
-				}
-				if (
-					!health?.total ||
-					health.running !== health.total ||
-					health.starting !== 0 ||
-					health.unhealthy !== 0
-				) {
-					continue;
-				}
-				if (project === 'tinyauth' && health.healthy !== health.total) {
-					continue;
-				}
-				if (
-					matches(
-						expected,
-						data.lastDeploy.commitSHA,
-						tempPath,
-						project === 'tinyauth',
-					)
-				) {
-					ready++;
-				}
-			} catch (error) {
-				if (error.message === 'docker-cd API authentication failed') {
-					throw error;
-				}
-			}
-		}
-		if (ready === projects.length) {
+		if (
+			(await projectReady('tinyauth')) &&
+			(await projectReady(path.basename(tempPath)))
+		) {
 			return;
 		}
 		if (attempt + 1 < attempts) {
-			await pause();
+			await new Promise((resolve) => setTimeout(resolve, 10000));
 		}
 	}
 	throw new Error(

@@ -11,6 +11,7 @@ import {
 	usersAllow,
 	authEnvironment,
 	inheritedAllowlist,
+	tinyauthRules,
 	main as deploy,
 	collectHosts,
 	dependentServices,
@@ -598,15 +599,18 @@ describe('preview access rules', () => {
 		const second = updateAccess(config, other);
 		const both = updateAccess(second, options);
 		assert.equal(updateAccess(both, { ...options, allowlist: null }), second);
-		const unowned = updateAccess(config, options)
-			.split('\n')
-			.filter((line) => !line.includes('# preview-access:'))
-			.join('\n');
+		const unowned = updateAccess(config, options).replace(
+			options.hostname,
+			'production.example.com',
+		);
 		assert.throws(() => updateAccess(unowned, options), /unowned/);
 	});
 	it('inherits admin and users allowlists, including middleware chains and map labels', () => {
 		const env = authEnvironment(config);
-		assert.equal(inheritedAllowlist(app().services, env), adminAllow);
+		assert.equal(
+			inheritedAllowlist(tinyauthRules(app().services), env),
+			adminAllow,
+		);
 		const users = app(
 			'users.example.com',
 			'rate-limit@file,tinyauth-no-ratelimit@file',
@@ -614,22 +618,32 @@ describe('preview access rules', () => {
 		users.services.demo.labels = Object.fromEntries(
 			users.services.demo.labels.map((label) => label.split('=')),
 		);
-		assert.equal(inheritedAllowlist(users.services, env), usersAllow);
+		assert.equal(
+			inheritedAllowlist(tinyauthRules(users.services), env),
+			usersAllow,
+		);
 		assert.equal(
 			inheritedAllowlist(
-				app('users.example.com', 'rate-limit@file').services,
+				tinyauthRules(app('users.example.com', 'rate-limit@file').services),
 				env,
 			),
 			null,
 		);
 		assert.throws(
-			() => inheritedAllowlist(app('unknown.example.com').services, env),
+			() =>
+				inheritedAllowlist(
+					tinyauthRules(app('unknown.example.com').services),
+					env,
+				),
 			/Expected one/,
 		);
 		assert.throws(
 			() =>
 				inheritedAllowlist(
-					{ ...app().services, users: app('users.example.com').services.demo },
+					tinyauthRules({
+						...app().services,
+						users: app('users.example.com').services.demo,
+					}),
 					env,
 				),
 			/different/,
