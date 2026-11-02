@@ -1,17 +1,28 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { imageRepository, updateComposeImageTag } from './update-tag.js';
+import { imageRepository, updateComposeImageTag } from './image.js';
+
+const REGEX_MISSING_SERVICE = /Service "web" not found/;
 
 describe('imageRepository', () => {
-	it('removes tags and digests', () => {
-		assert.strictEqual(imageRepository('ghcr.io/wajeht/app:old@sha256:abc'), 'ghcr.io/wajeht/app');
-		assert.strictEqual(imageRepository('ghcr.io/wajeht/app@sha256:abc'), 'ghcr.io/wajeht/app');
-		assert.strictEqual(imageRepository('ghcr.io/wajeht/app'), 'ghcr.io/wajeht/app');
+	it('removes tags and digests', function () {
+		assert.strictEqual(
+			imageRepository('ghcr.io/wajeht/app:old@sha256:abc'),
+			'ghcr.io/wajeht/app',
+		);
+		assert.strictEqual(
+			imageRepository('ghcr.io/wajeht/app@sha256:abc'),
+			'ghcr.io/wajeht/app',
+		);
+		assert.strictEqual(
+			imageRepository('ghcr.io/wajeht/app'),
+			'ghcr.io/wajeht/app',
+		);
 	});
 });
 
-describe('updateComposeImageTag', () => {
-	it('updates only the requested service image', () => {
+describe('updateComposeImageTag', function () {
+	it('updates only the requested service image', function () {
 		const content = [
 			'# keep this comment',
 			'services:',
@@ -44,8 +55,13 @@ describe('updateComposeImageTag', () => {
 		);
 	});
 
-	it('drops stale image digests when updating the tag', () => {
-		const content = ['services:', '  web:', '    image: ghcr.io/wajeht/web:old@sha256:abc', ''].join('\n');
+	it('drops stale image digests when updating the tag', function () {
+		const content = [
+			'services:',
+			'  web:',
+			'    image: ghcr.io/wajeht/web:old@sha256:abc',
+			'',
+		].join('\n');
 
 		const result = updateComposeImageTag(content, {
 			serviceName: 'web',
@@ -56,12 +72,22 @@ describe('updateComposeImageTag', () => {
 
 		assert.strictEqual(
 			result.content,
-			['services:', '  web:', '    image: ghcr.io/wajeht/web:new@sha256:def', ''].join('\n'),
+			[
+				'services:',
+				'  web:',
+				'    image: ghcr.io/wajeht/web:new@sha256:def',
+				'',
+			].join('\n'),
 		);
 	});
 
-	it('is a no-op when already at the tag and digest', () => {
-		const content = ['services:', '  web:', '    image: ghcr.io/wajeht/web:new@sha256:def', ''].join('\n');
+	it('is a no-op when already at the tag and digest', function () {
+		const content = [
+			'services:',
+			'  web:',
+			'    image: ghcr.io/wajeht/web:new@sha256:def',
+			'',
+		].join('\n');
 
 		const result = updateComposeImageTag(content, {
 			serviceName: 'web',
@@ -74,8 +100,10 @@ describe('updateComposeImageTag', () => {
 		assert.strictEqual(result.content, content);
 	});
 
-	it('does not update a service with a different image repo', () => {
-		const content = ['services:', '  web:', '    image: nginx:latest', ''].join('\n');
+	it('does not update a service with a different image repo', function () {
+		const content = ['services:', '  web:', '    image: nginx:latest', ''].join(
+			'\n',
+		);
 
 		const result = updateComposeImageTag(content, {
 			serviceName: 'web',
@@ -97,7 +125,7 @@ describe('updateComposeImageTag', () => {
 					tag: 'new',
 					digest: 'sha256:def',
 				}),
-			/Service "web" not found/,
+			REGEX_MISSING_SERVICE,
 		);
 	});
 });

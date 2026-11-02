@@ -73,7 +73,7 @@ jobs:
 
       - name: Update image tag
         run: |
-          node .deploy-workflow/src/update-tag.js \
+          node .deploy-workflow/src/image.js \
             --app-path "${{ inputs.app-path }}" \
             --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \
@@ -82,7 +82,7 @@ jobs:
 
       - name: Commit and push
         run: |
-          node .deploy-workflow/src/git-push.js \
+          node .deploy-workflow/src/git.js \
             --paths "${{ inputs.app-path }}/docker-compose.yml" \
             --message "chore(${{ github.event.repository.name }}): update to ${{ inputs.tag }}"
 

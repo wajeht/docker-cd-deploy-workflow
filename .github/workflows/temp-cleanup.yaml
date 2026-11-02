@@ -34,6 +34,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.home-ops-repo }}
+          ref: main
+          fetch-depth: 0
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Checkout deploy workflow scripts
@@ -48,16 +50,22 @@ jobs:
         with:
           node-version: 26
 
+      - name: Install dependencies
+        run: cd .deploy-workflow && npm ci
+
       - name: Remove temp stack
+        id: cleanup
         run: |
-          node .deploy-workflow/src/temp-cleanup.js \
+          node .deploy-workflow/src/preview.js \
+            --action cleanup \
             --app-path "${{ inputs.app-path }}" \
             --pr-number "${{ github.event.pull_request.number }}"
 
       - name: Commit and push
         run: |
-          node .deploy-workflow/src/git-push.js \
-            --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
+          node .deploy-workflow/src/git.js \
+            --paths "${{ steps.cleanup.outputs.temp-path }}" \
+            --paths apps/tinyauth/docker-compose.yml \
             --message "chore(${{ github.event.repository.name }}): remove temp deploy pr-${{ github.event.pull_request.number }}"
 
       - name: Cleanup GitHub deployment
@@ -69,4 +77,5 @@ jobs:
             --environment "pr-${{ github.event.pull_request.number }}"
 
       - name: Cleanup workflow scripts
+        if: always()
         run: rm -rf .deploy-workflow
