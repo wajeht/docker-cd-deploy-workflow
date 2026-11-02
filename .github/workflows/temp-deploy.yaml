@@ -31,10 +31,10 @@ on:
     secrets:
       DOCKER_CD_URL:
         required: false
-        description: "HTTPS docker-cd URL; required when Home Ops contains Tinyauth"
+        description: "HTTPS docker-cd URL; required for Tinyauth previews"
       DOCKER_CD_API_SECRET:
         required: false
-        description: "docker-cd API bearer token; required when Home Ops contains Tinyauth"
+        description: "docker-cd API token; required for Tinyauth previews"
       GH_TOKEN:
         required: true
         description: "GitHub PAT with repo and packages access"
@@ -50,9 +50,6 @@ jobs:
       deployments: write
     outputs:
       url: ${{ steps.rewrite.outputs.url }}
-    env:
-      DOCKER_CD_URL: ${{ secrets.DOCKER_CD_URL }}
-      DOCKER_CD_API_SECRET: ${{ secrets.DOCKER_CD_API_SECRET }}
     steps:
       - name: Checkout home-ops
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -97,12 +94,10 @@ jobs:
             --environment "pr-${{ github.event.pull_request.number }}" \
             --ref "${{ github.event.pull_request.head.sha }}"
 
-      - name: Register and push preview
+      - name: Rewrite compose for temp deploy
         id: rewrite
         run: |
-          node .deploy-workflow/src/temp-push.js \
-            --action deploy \
-            --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}" \
+          node .deploy-workflow/src/temp-compose.js \
             --app-path "${{ inputs.app-path }}" \
             --service-name "${{ inputs.service-name }}" \
             --tag "${{ inputs.tag }}" \
@@ -111,15 +106,16 @@ jobs:
             --auth-middleware "${{ inputs.auth-middleware }}" \
             --app-repo-path .app-repo
 
-      - name: Wait for preview and Tinyauth deployment
-        if: steps.rewrite.outputs.auth-managed == 'true'
+      - name: Commit and push
         run: |
-          node .deploy-workflow/src/wait-preview.js \
-            --app-path "${{ inputs.app-path }}" \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --commit "${{ steps.rewrite.outputs.commit }}"
+          node .deploy-workflow/src/git-push.js \
+            --paths "${{ inputs.app-path }}-pr-${{ github.event.pull_request.number }}" \
+            --message "chore(${{ github.event.repository.name }}): temp deploy pr-${{ github.event.pull_request.number }} @ ${{ inputs.tag }}"
 
       - name: Mark deployment success
+        env:
+          DOCKER_CD_URL: ${{ secrets.DOCKER_CD_URL }}
+          DOCKER_CD_API_SECRET: ${{ secrets.DOCKER_CD_API_SECRET }}
         run: |
           node .deploy-workflow/src/deployment.js \
             --action deploy \
@@ -128,17 +124,7 @@ jobs:
             --environment "pr-${{ github.event.pull_request.number }}" \
             --deployment-id "${{ steps.deployment.outputs.deployment-id }}" \
             --url "${{ steps.rewrite.outputs.url }}" \
-            --verified "${{ steps.rewrite.outputs.auth-managed }}"
-
-      - name: Mark deployment failed
-        if: failure() && steps.deployment.outputs.deployment-id != ''
-        run: |
-          node .deploy-workflow/src/deployment.js \
-            --action failure \
-            --token "${{ github.token }}" \
-            --repo "${{ github.repository }}" \
-            --environment "pr-${{ github.event.pull_request.number }}" \
-            --deployment-id "${{ steps.deployment.outputs.deployment-id }}"
+            --app-path "${{ steps.rewrite.outputs.temp-path }}"
 
       - name: Cleanup workflow scripts
         if: always()

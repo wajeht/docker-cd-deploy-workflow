@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
+import { authPath } from './temp-cleanup.js';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -33,9 +35,13 @@ export async function main(argv = process.argv.slice(2)) {
 		run('git', ['add', '-A']);
 	} else {
 		try {
-			run('git', ['add', paths]);
-		} catch {
-			// path may not exist (already cleaned up), check for staged changes below
+			execFileSync('git', ['add', paths], { stdio: ['ignore', 'pipe', 'pipe'] });
+		} catch (error) {
+			// A missing path is normal after cleanup; do not hide other staging failures.
+			if (!/did not match any files/.test(String(error.stderr))) throw error;
+		}
+		if (/-pr-\d+$/.test(paths) && fs.existsSync(authPath)) {
+			run('git', ['add', authPath]);
 		}
 	}
 
@@ -58,7 +64,11 @@ export async function main(argv = process.argv.slice(2)) {
 				throw new Error('Push failed after 3 attempts');
 			}
 			console.log(`Push failed (attempt ${i}/3), rebasing...`);
-			run('git', ['pull', '--rebase', 'origin', 'main']);
+			try {
+				run('git', ['pull', '--rebase', 'origin', 'main']);
+			} catch {
+				throw new Error('Concurrent changes conflict; rerun the workflow from the latest Home Ops main');
+			}
 		}
 	}
 }

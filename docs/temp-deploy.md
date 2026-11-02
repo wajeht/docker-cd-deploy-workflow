@@ -32,7 +32,7 @@ Close PR or remove the last temp deploy label
 1. Wildcard DNS for `*.jaw.dev`
 2. Wildcard TLS cert in Traefik for `*.jaw.dev`
 3. `GH_TOKEN` secret with `repo` and `packages` scope
-4. For Home Ops with Tinyauth: `DOCKER_CD_URL` (HTTPS API origin) and `DOCKER_CD_API_SECRET` secrets in the caller repo, forwarded to both workflows
+4. For Home Ops with Tinyauth: `DOCKER_CD_URL` (HTTPS API origin) and `DOCKER_CD_API_SECRET` secrets in the caller repo, forwarded to the deploy workflow
 5. `temp-deploy` and `temp-deploy-with-auth` labels:
 
 ```bash
@@ -153,8 +153,6 @@ jobs:
       app-path: apps/your-app
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
-      DOCKER_CD_URL: ${{ secrets.DOCKER_CD_URL }}
-      DOCKER_CD_API_SECRET: ${{ secrets.DOCKER_CD_API_SECRET }}
 ```
 
 ## What Gets Rewritten
@@ -205,11 +203,11 @@ with:
   auth-middleware: tinyauth@file
 ```
 
-If omitted, temp deploys keep the production middleware labels. Inherited Tinyauth routes copy their exact production domain's `TINYAUTH_ADMIN_ALLOW` or `TINYAUTH_USERS_ALLOW` OAuth allowlist. Explicit `tinyauth@file` previews always use `TINYAUTH_ADMIN_ALLOW`. Conflicting or missing inherited rules fail closed.
+If omitted, temp deploys keep production middleware and its `TINYAUTH_ADMIN_ALLOW` or `TINYAUTH_USERS_ALLOW` allowlist. Explicit `tinyauth@file` previews use `TINYAUTH_ADMIN_ALLOW`. Missing or conflicting inherited rules fail closed.
 
-The workflows commit the preview stack and its exact-domain rule together. Each preview owns a marked block in `apps/tinyauth/docker-compose.yml`; redeploys reuse it, public mode removes it, and cleanup removes it even if the stack directory is already gone. No wildcard rules or Basic authentication are added. Conflicting Git pushes rerun the operation on the latest Home Ops main, preserving other previews and production rules.
+The existing compose/cleanup scripts add or remove only that preview's exact-domain OAuth rule. `git-push.js` commits the stack and rule together. Conflicting concurrent edits fail safely; rerun the workflow from the latest Home Ops main.
 
-Home Ops must keep Tinyauth's `rolling_update: false` and default-deny ACL policy. docker-cd recreates it when its environment changes. The workflows wait up to roughly ten minutes for docker-cd's authenticated API to confirm the committed configuration and healthy containers, including Tinyauth. Cleanup also waits for the preview to disappear. A timeout fails the job; a login-page redirect never counts as readiness. These API checks do not replace a real Google-login test.
+`deployment.js` checks docker-cd's deployed revisions and container health before marking a Tinyauth preview ready. Home Ops must use `rolling_update: false` to recreate Tinyauth after environment changes. A timeout fails the deployment; a login redirect does not count as readiness.
 
 For per-PR auth, gate the input from labels:
 
@@ -248,6 +246,4 @@ Recommended label behavior:
 
 ## Rollout
 
-Release this workflow change, then update **both** preview deploy and cleanup pins in `bang`, `jaw.dev`, and `videos`. Forward the two docker-cd secrets above and replace `oauth2-admin@file` inputs with `tinyauth@file` during the Home Ops auth cutover. Do not switch callers while live routes still use OAuth2 Proxy. Merging this PR alone does not release or update those callers.
-
-After cutover, verify Google admin access, users-only denial on an explicit admin preview, inherited users access, Basic gateway rejection, unknown-domain denial, public mode, and cleanup after PR closure or removing the last preview label.
+Release this change, then update both preview workflow pins in `bang`, `jaw.dev`, and `videos`. Change their auth input to `tinyauth@file` and pass the two docker-cd secrets to the deploy workflow during the Home Ops cutover. Verify Google admin/users access, Basic rejection, public mode, and cleanup before completing the migration.

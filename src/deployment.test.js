@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { main } from './deployment.js';
+import { main, waitForTinyauth } from './deployment.js';
 
 function fakeFetch(responses) {
 	const calls = [];
@@ -54,22 +54,6 @@ function withGithubOutput(t) {
 }
 
 describe('deployment', () => {
-	it('reports verified readiness without following a login redirect', async (t) => {
-		const fetch = fakeFetch([{}]);
-		withFetch(t, fetch);
-		await main(['--token', 'token', '--repo', 'wajeht/app', '--action', 'deploy', '--environment', 'pr-1',
-			'--deployment-id', '123', '--url', 'https://pr-1-app.example.com', '--verified', 'true']);
-		assert.strictEqual(fetch.calls.length, 1);
-		assert.strictEqual(fetch.calls[0].body.description, 'Temp deploy and access rules are ready');
-	});
-
-	it('marks a failed preview deployment as failure', async (t) => {
-		const fetch = fakeFetch([{}]);
-		withFetch(t, fetch);
-		await main(['--token', 'token', '--repo', 'wajeht/app', '--action', 'failure', '--environment', 'pr-1', '--deployment-id', '123']);
-		assert.strictEqual(fetch.calls[0].body.state, 'failure');
-	});
-
 	it('requests a deployment and writes the deployment id output', async (t) => {
 		const fetch = fakeFetch([{ json: { id: 123 } }, {}]);
 		const outputFile = withGithubOutput(t);
@@ -197,4 +181,34 @@ describe('deployment', () => {
 			/GitHub API GET \/deployments\?environment=temp%2Fpr-1&per_page=100: 500 nope/,
 		);
 	});
+});
+
+
+it('checks deployed state instead of accepting a login page', async (t) => {
+	const oldUrl = process.env.DOCKER_CD_URL;
+	const oldSecret = process.env.DOCKER_CD_API_SECRET;
+	process.env.DOCKER_CD_URL = 'https://cd.example.com';
+	process.env.DOCKER_CD_API_SECRET = 'test';
+	t.after(() => {
+		if (oldUrl === undefined) delete process.env.DOCKER_CD_URL; else process.env.DOCKER_CD_URL = oldUrl;
+		if (oldSecret === undefined) delete process.env.DOCKER_CD_API_SECRET; else process.env.DOCKER_CD_API_SECRET = oldSecret;
+	});
+	const ready = { sync: 'synced', lastDeploy: { status: 'synced', commitSHA: 'a'.repeat(40) },
+		health: { total: 1, running: 1, healthy: 1, starting: 0, unhealthy: 0 } };
+	const options = { attempts: 1, matches: () => true };
+	withFetch(t, async (url, request) => {
+		assert.strictEqual(request.redirect, 'error');
+		assert.strictEqual(request.headers.Authorization, 'Bearer test');
+		return Response.json({ success: true, data: ready });
+	});
+	await waitForTinyauth('apps/demo-pr-42', options);
+	await assert.rejects(() => waitForTinyauth('apps/demo-pr-42', { ...options, matches: () => false }), /Timed out/);
+	for (const data of [{ ...ready, lastDeploy: { status: 'failed' } }, { ...ready, health: { ...ready.health, starting: 1 } }]) {
+		globalThis.fetch = async () => Response.json({ success: true, data });
+		await assert.rejects(() => waitForTinyauth('apps/demo-pr-42', options), /Timed out/);
+	}
+	globalThis.fetch = async () => new Response('<html>login</html>');
+	await assert.rejects(() => waitForTinyauth('apps/demo-pr-42', options), /Timed out/);
+	globalThis.fetch = async () => new Response('', { status: 401 });
+	await assert.rejects(() => waitForTinyauth('apps/demo-pr-42', options), /authentication/);
 });
