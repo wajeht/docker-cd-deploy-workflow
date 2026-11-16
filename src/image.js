@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import yaml from 'js-yaml';
+import { load } from 'js-yaml';
 
 const REGEX_META_CHARACTERS = /[.*+?^${}()|[\]\\]/g;
 const REGEX_SERVICES = /^(\s*)services:\s*(?:#.*)?$/;
@@ -83,7 +83,7 @@ export function updateComposeImageTag(
 	content,
 	{ serviceName, repo, tag, digest },
 ) {
-	const doc = yaml.load(content);
+	const doc = load(content);
 	if (!isObject(doc) || !isObject(doc.services)) {
 		throw new Error('docker-compose.yml must contain a services block');
 	}
