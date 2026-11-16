@@ -11,7 +11,6 @@ import {
 	updateAccess,
 	AUTH_PATH,
 	previewId,
-	ADMIN_ALLOW,
 	parseAuthEnvironment,
 } from './preview.js';
 import { isDeploymentCurrent } from './deployment.js';
@@ -200,7 +199,7 @@ describe('git', function () {
 				appPath: 'apps/demo',
 				prNumber: pr,
 				hostname: `pr-${pr}-demo.example.com`,
-				allowlist: ADMIN_ALLOW,
+				access: { group: 'admins', whitelist: '/.+/' },
 			};
 		}
 		function pushPreview() {
@@ -251,8 +250,8 @@ describe('git', function () {
 			);
 			for (const pr of ['42', '43']) {
 				assert.strictEqual(
-					env[`TINYAUTH_APPS_${previewId('apps/demo', pr)}_OAUTH_WHITELIST`],
-					ADMIN_ALLOW,
+					env[`TINYAUTH_APPS_${previewId('apps/demo', pr)}_OAUTH_GROUPS`],
+					'admins',
 				);
 			}
 			process.chdir(first);

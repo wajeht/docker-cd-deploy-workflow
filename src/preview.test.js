@@ -7,10 +7,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import {
-	ADMIN_ALLOW,
-	USERS_ALLOW,
 	parseAuthEnvironment,
-	resolveInheritedAllowlist,
+	resolveInheritedAccess,
 	tinyauthRules,
 	main,
 	hosts,
@@ -25,7 +23,8 @@ import {
 const REGEX_MISSING_SERVICE = /Could not find app service "api"/;
 const REGEX_UNOWNED_RULE = /unowned/;
 const REGEX_MISSING_RULE = /Expected one/;
-const REGEX_DIFFERENT_ALLOWLISTS = /different/;
+const REGEX_DIFFERENT_ACCESS = /different Tinyauth access rules/;
+const REGEX_INVALID_ACCESS = /Invalid Tinyauth group or email rule/;
 const REGEX_DEFAULT_DENY = /deny/;
 const REGEX_RECREATION = /recreation/;
 const REGEX_MISSING_AUTH = /missing/;
@@ -629,16 +628,18 @@ services:
     environment:
       TINYAUTH_AUTH_ACLS_POLICY: deny
       TINYAUTH_APPS_ADMIN_CONFIG_DOMAIN: admin.example.com
-      TINYAUTH_APPS_ADMIN_OAUTH_WHITELIST: \${TINYAUTH_ADMIN_ALLOW:?required}
+      TINYAUTH_APPS_ADMIN_OAUTH_WHITELIST: "/.+/"
+      TINYAUTH_APPS_ADMIN_OAUTH_GROUPS: admins
       TINYAUTH_APPS_USERS_CONFIG_DOMAIN: users.example.com
-      TINYAUTH_APPS_USERS_OAUTH_WHITELIST: \${TINYAUTH_USERS_ALLOW:?required}
+      TINYAUTH_APPS_USERS_OAUTH_WHITELIST: "member@example.com"
+      TINYAUTH_APPS_USERS_OAUTH_GROUPS: users
       TZ: America/Chicago
 `;
 const PREVIEW_OPTIONS = {
 	appPath: 'apps/demo',
 	prNumber: '42',
 	hostname: 'pr-42-demo.example.com',
-	allowlist: ADMIN_ALLOW,
+	access: { group: 'admins', whitelist: '/.+/' },
 };
 function app(host = 'admin.example.com', middleware = 'tinyauth@file') {
 	return {
@@ -663,9 +664,10 @@ describe('preview access rules', function () {
 			env[`TINYAUTH_APPS_${id}_CONFIG_DOMAIN`],
 			PREVIEW_OPTIONS.hostname,
 		);
-		assert.equal(env[`TINYAUTH_APPS_${id}_OAUTH_WHITELIST`], ADMIN_ALLOW);
+		assert.equal(env[`TINYAUTH_APPS_${id}_OAUTH_WHITELIST`], '/.+/');
+		assert.equal(env[`TINYAUTH_APPS_${id}_OAUTH_GROUPS`], 'admins');
 		assert.equal(
-			updateAccess(result, { ...PREVIEW_OPTIONS, allowlist: null }),
+			updateAccess(result, { ...PREVIEW_OPTIONS, access: null }),
 			PREVIEW_CONFIG,
 		);
 		assert.equal(updateAccess(result, PREVIEW_OPTIONS), result);
@@ -680,7 +682,7 @@ describe('preview access rules', function () {
 		const second = updateAccess(PREVIEW_CONFIG, other);
 		const both = updateAccess(second, PREVIEW_OPTIONS);
 		assert.equal(
-			updateAccess(both, { ...PREVIEW_OPTIONS, allowlist: null }),
+			updateAccess(both, { ...PREVIEW_OPTIONS, access: null }),
 			second,
 		);
 		const unowned = updateAccess(PREVIEW_CONFIG, PREVIEW_OPTIONS).replace(
@@ -692,11 +694,11 @@ describe('preview access rules', function () {
 			REGEX_UNOWNED_RULE,
 		);
 	});
-	it('inherits admin and users allowlists, including middleware chains and map labels', function () {
+	it('inherits Pocket ID groups and email rules from protected routers', function () {
 		const env = parseAuthEnvironment(PREVIEW_CONFIG);
-		assert.equal(
-			resolveInheritedAllowlist(tinyauthRules(app().services), env),
-			ADMIN_ALLOW,
+		assert.deepStrictEqual(
+			resolveInheritedAccess(tinyauthRules(app().services), env),
+			{ group: 'admins', whitelist: '/.+/' },
 		);
 		const users = app(
 			'users.example.com',
@@ -710,15 +712,15 @@ describe('preview access rules', function () {
 		const usersWithMapLabels = {
 			services: { demo: { ...users.services.demo, labels } },
 		};
-		assert.equal(
-			resolveInheritedAllowlist(
+		assert.deepStrictEqual(
+			resolveInheritedAccess(
 				tinyauthRules(usersWithMapLabels.services),
 				env,
 			),
-			USERS_ALLOW,
+			{ group: 'users', whitelist: 'member@example.com' },
 		);
 		assert.equal(
-			resolveInheritedAllowlist(
+			resolveInheritedAccess(
 				tinyauthRules(app('users.example.com', 'rate-limit@file').services),
 				env,
 			),
@@ -726,7 +728,7 @@ describe('preview access rules', function () {
 		);
 		assert.throws(
 			() =>
-				resolveInheritedAllowlist(
+				resolveInheritedAccess(
 					tinyauthRules(app('unknown.example.com').services),
 					env,
 				),
@@ -734,14 +736,22 @@ describe('preview access rules', function () {
 		);
 		assert.throws(
 			() =>
-				resolveInheritedAllowlist(
+				resolveInheritedAccess(
 					tinyauthRules({
 						...app().services,
 						users: app('users.example.com').services.demo,
 					}),
 					env,
 				),
-			REGEX_DIFFERENT_ALLOWLISTS,
+			REGEX_DIFFERENT_ACCESS,
+		);
+		assert.throws(
+			() =>
+				resolveInheritedAccess(tinyauthRules(app().services), {
+					...env,
+					TINYAUTH_APPS_ADMIN_OAUTH_GROUPS: undefined,
+				}),
+			REGEX_INVALID_ACCESS,
 		);
 	});
 	it('fails closed for default allow or rolling updates', function () {
@@ -793,11 +803,15 @@ describe('preview access rules', function () {
 			function readConfig() {
 				return fs.readFileSync('apps/tinyauth/docker-compose.yml', 'utf8');
 			}
-			const key = `TINYAUTH_APPS_${previewId('apps/demo', '42')}_OAUTH_WHITELIST`;
+			const prefix = `TINYAUTH_APPS_${previewId('apps/demo', '42')}_`;
 			await deployPreview(app('users.example.com'));
-			assert.equal(parseAuthEnvironment(readConfig())[key], USERS_ALLOW);
+			const inherited = parseAuthEnvironment(readConfig());
+			assert.equal(inherited[`${prefix}OAUTH_GROUPS`], 'users');
+			assert.equal(inherited[`${prefix}OAUTH_WHITELIST`], 'member@example.com');
 			await deployPreview(app('users.example.com'), 'tinyauth@file');
-			assert.equal(parseAuthEnvironment(readConfig())[key], ADMIN_ALLOW);
+			const explicit = parseAuthEnvironment(readConfig());
+			assert.equal(explicit[`${prefix}OAUTH_GROUPS`], 'admins');
+			assert.equal(explicit[`${prefix}OAUTH_WHITELIST`], '/.+/');
 			await deployPreview(app('users.example.com', 'rate-limit@file'));
 			assert.equal(readConfig(), PREVIEW_CONFIG);
 			await deployPreview(

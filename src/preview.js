@@ -21,8 +21,7 @@ const AUTH_MIDDLEWARES = Object.freeze({
 });
 
 export const AUTH_PATH = 'apps/tinyauth/docker-compose.yml';
-export const ADMIN_ALLOW = '${TINYAUTH_ADMIN_ALLOW:?required}';
-export const USERS_ALLOW = '${TINYAUTH_USERS_ALLOW:?required}';
+const ADMIN_ACCESS = { group: 'admins', whitelist: '/.+/' };
 
 export function previewId(appPath, prNumber) {
 	const input = `${path.basename(appPath)}:${prNumber}`;
@@ -30,30 +29,38 @@ export function previewId(appPath, prNumber) {
 	return `PREVIEW${digest.toUpperCase()}`;
 }
 
-// Edit only this preview's two keys, preserving production YAML and comments.
-export function updateAccess(text, { appPath, prNumber, hostname, allowlist }) {
+// Edit only this preview's keys, preserving production YAML and comments.
+export function updateAccess(text, { appPath, prNumber, hostname, access }) {
 	const prefix = `TINYAUTH_APPS_${previewId(appPath, prNumber)}_`;
 	const domainKey = `      ${prefix}CONFIG_DOMAIN: `;
-	const allowKey = `      ${prefix}OAUTH_WHITELIST: `;
+	const whitelistKey = `      ${prefix}OAUTH_WHITELIST: `;
+	const groupKey = `      ${prefix}OAUTH_GROUPS: `;
 	const lines = text.split('\n');
 	const domain = lines.find((line) => line.startsWith(domainKey));
-	const hasRule = lines.some((line) => line.startsWith(allowKey));
+	function isPreviewKey(line) {
+		return (
+			line.startsWith(domainKey) ||
+			line.startsWith(whitelistKey) ||
+			line.startsWith(groupKey)
+		);
+	}
 	const previewHost = `pr-${prNumber}-${path.basename(appPath)}.`;
 	if (
-		(domain || hasRule) &&
+		lines.some(isPreviewKey) &&
 		!domain?.startsWith(`${domainKey}${previewHost}`)
 	) {
 		throw new Error('Refusing to modify an unowned Tinyauth rule');
 	}
-	const updated = lines
-		.filter((line) => {
-			return !line.startsWith(domainKey) && !line.startsWith(allowKey);
-		})
-		.join('\n');
-	if (!allowlist) {
+	const updated = lines.filter((line) => !isPreviewKey(line)).join('\n');
+	if (!access) {
 		return updated;
 	}
-	const rule = `${domainKey}${hostname}\n${allowKey}${allowlist}\n`;
+	const rule = [
+		`${domainKey}${hostname}`,
+		`${whitelistKey}${JSON.stringify(access.whitelist)}`,
+		`${groupKey}${access.group}`,
+		'',
+	].join('\n');
 	if (text.includes(rule)) {
 		return text;
 	}
@@ -61,9 +68,8 @@ export function updateAccess(text, { appPath, prNumber, hostname, allowlist }) {
 	if (!service?.includes('    environment:\n')) {
 		throw new Error('Unsupported Tinyauth Compose layout');
 	}
-	return updated.replace(
-		service,
-		service.replace('    environment:\n', `    environment:\n${rule}`),
+	return updated.replace(service, () =>
+		service.replace('    environment:\n', (header) => `${header}${rule}`),
 	);
 }
 
@@ -91,7 +97,7 @@ export function removePreview(appPath, prNumber) {
 		const text = fs.readFileSync(AUTH_PATH, 'utf8');
 		fs.writeFileSync(
 			AUTH_PATH,
-			updateAccess(text, { appPath: directory, prNumber, allowlist: null }),
+			updateAccess(text, { appPath: directory, prNumber, access: null }),
 		);
 	}
 
@@ -170,8 +176,8 @@ export function parseAuthEnvironment(text) {
 }
 
 // One preview hostname cannot represent two different access policies safely.
-export function resolveInheritedAllowlist(rules, env) {
-	const allowlists = new Set();
+export function resolveInheritedAccess(rules, env) {
+	let access = null;
 	for (const rule of rules) {
 		const routerHosts = [...rule.matchAll(REGEX_HOST)];
 		if (!routerHosts.length) {
@@ -184,18 +190,23 @@ export function resolveInheritedAllowlist(rules, env) {
 			if (keys.length !== 1) {
 				throw new Error(`Expected one Tinyauth rule for ${host}`);
 			}
-			const allowlist =
-				env[keys[0].replace('CONFIG_DOMAIN', 'OAUTH_WHITELIST')];
-			if (![ADMIN_ALLOW, USERS_ALLOW].includes(allowlist)) {
-				throw new Error(`Unsupported Tinyauth allowlist for ${host}`);
+			const prefix = keys[0].slice(0, -'CONFIG_DOMAIN'.length);
+			const group = env[`${prefix}OAUTH_GROUPS`];
+			const whitelist = env[`${prefix}OAUTH_WHITELIST`];
+			if (
+				!['admins', 'users'].includes(group) ||
+				typeof whitelist !== 'string' ||
+				whitelist.trim() === ''
+			) {
+				throw new Error(`Invalid Tinyauth group or email rule for ${host}`);
 			}
-			allowlists.add(allowlist);
+			if (access && (access.group !== group || access.whitelist !== whitelist)) {
+				throw new Error('Preview routers have different Tinyauth access rules');
+			}
+			access = { group, whitelist };
 		}
 	}
-	if (allowlists.size > 1) {
-		throw new Error('Preview routers have different Tinyauth allowlists');
-	}
-	return [...allowlists][0] ?? null;
+	return access;
 }
 
 export function syncAccess(options, rules = []) {
@@ -212,15 +223,15 @@ export function syncAccess(options, rules = []) {
 	}
 	const text = fs.readFileSync(AUTH_PATH, 'utf8');
 	const env = parseAuthEnvironment(text);
-	let allowlist = null;
+	let access = null;
 	if (protectedServices && middleware) {
-		allowlist = ADMIN_ALLOW;
+		access = ADMIN_ACCESS;
 	} else if (protectedServices) {
-		allowlist = resolveInheritedAllowlist(rules, env);
+		access = resolveInheritedAccess(rules, env);
 	}
 	const prefix = `TINYAUTH_APPS_${previewId(options.appPath, options.prNumber)}_`;
 	if (
-		allowlist &&
+		access &&
 		Object.entries(env).some(
 			([key, value]) =>
 				key.endsWith('_CONFIG_DOMAIN') &&
@@ -230,7 +241,7 @@ export function syncAccess(options, rules = []) {
 	) {
 		throw new Error('Preview hostname already belongs to another rule');
 	}
-	fs.writeFileSync(AUTH_PATH, updateAccess(text, { ...options, allowlist }));
+	fs.writeFileSync(AUTH_PATH, updateAccess(text, { ...options, access }));
 }
 
 export function hosts(services) {

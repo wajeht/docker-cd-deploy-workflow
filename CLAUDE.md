@@ -23,7 +23,7 @@ Keep preview creation and cleanup together. Keep Git operations independent of a
 
 Preview creation keeps the selected service and recursive `depends_on` services. It rewrites image tags, router names, hostnames, and bind mounts, removes unused networks/volumes and `container_name`, and writes `x-docker-cd.rolling_update: false`. PR `.env.sops` is copied as `.env.sops.override`.
 
-Protected previews need exact-domain Tinyauth OAuth rules. Explicit auth uses `TINYAUTH_ADMIN_ALLOW`; inherited auth preserves the production admin/users allowlist. Cleanup removes only the preview's rule. Preserve Home Ops YAML comments and unrelated production rules; never log decrypted credentials.
+Protected previews need a Tinyauth rule with an exact hostname, an email rule, and a Pocket ID group. Explicit auth requires `admins`; inherited auth keeps the production group and email rule. Cleanup removes only the preview's rule. Preserve Home Ops YAML comments and unrelated production rules; never log decrypted credentials.
 
 ## Naming Conventions
 

@@ -205,7 +205,7 @@ with:
   auth-middleware: tinyauth@file
 ```
 
-If omitted, temp deploys keep production middleware and its `TINYAUTH_ADMIN_ALLOW` or `TINYAUTH_USERS_ALLOW` allowlist. Explicit `tinyauth@file` previews use `TINYAUTH_ADMIN_ALLOW`. Missing or conflicting inherited rules fail closed.
+If omitted, temp deploys keep production middleware and its Pocket ID group and email rule. Explicit `tinyauth@file` previews require the `admins` group. Missing or conflicting inherited rules stop preview creation.
 
 `preview.js` owns creation and cleanup, including adding or removing only that preview's exact-domain OAuth rule. `git.js` commits the stack and rule together. Conflicting concurrent edits fail safely; rerun the workflow from the latest Home Ops main.
 
@@ -248,4 +248,4 @@ Recommended label behavior:
 
 ## Rollout
 
-Follow [release coordination](reference.md#release-coordination), then update both preview workflow pins in `bang`, `jaw.dev`, and `videos`. Change their auth input to `tinyauth@file` and pass the two docker-cd secrets to the deploy workflow during the Home Ops cutover. Verify Google admin/users access, Basic rejection, public mode, and cleanup before completing the migration.
+Follow [release coordination](reference.md#release-coordination). In `bang`, `jaw.dev`, and `videos`, change the auth input to `tinyauth@file` and pass the two docker-cd secrets to the deploy workflow. Verify Pocket ID access for `admins` and `users`, public previews, and cleanup.
