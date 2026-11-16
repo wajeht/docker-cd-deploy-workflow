@@ -4,7 +4,7 @@ import { imageRepository, updateComposeImageTag } from './image.js';
 
 const REGEX_MISSING_SERVICE = /Service "web" not found/;
 
-describe('imageRepository', () => {
+describe('imageRepository', function () {
 	it('removes tags and digests', function () {
 		assert.strictEqual(
 			imageRepository('ghcr.io/wajeht/app:old@sha256:abc'),
@@ -116,16 +116,14 @@ describe('updateComposeImageTag', function () {
 		assert.strictEqual(result.content, content);
 	});
 
-	it('fails when the requested service is missing', () => {
-		assert.throws(
-			() =>
-				updateComposeImageTag('services:\n  db:\n    image: postgres\n', {
-					serviceName: 'web',
-					repo: 'wajeht/web',
-					tag: 'new',
-					digest: 'sha256:def',
-				}),
-			REGEX_MISSING_SERVICE,
-		);
+	it('fails when the requested service is missing', function () {
+		assert.throws(function () {
+			return updateComposeImageTag('services:\n  db:\n    image: postgres\n', {
+				serviceName: 'web',
+				repo: 'wajeht/web',
+				tag: 'new',
+				digest: 'sha256:def',
+			});
+		}, REGEX_MISSING_SERVICE);
 	});
 });

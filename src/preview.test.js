@@ -148,14 +148,14 @@ describe('primaryHost', function () {
 });
 
 describe('serviceDependencies', function () {
-	it('reads list syntax', () => {
+	it('reads list syntax', function () {
 		assert.deepStrictEqual(
 			serviceDependencies({ depends_on: ['db', 'redis'] }),
 			['db', 'redis'],
 		);
 	});
 
-	it('reads condition map syntax', () => {
+	it('reads condition map syntax', function () {
 		assert.deepStrictEqual(
 			serviceDependencies({
 				depends_on: { db: { condition: 'service_healthy' } },
@@ -164,7 +164,7 @@ describe('serviceDependencies', function () {
 		);
 	});
 
-	it('ignores missing depends_on', () => {
+	it('ignores missing depends_on', function () {
 		assert.deepStrictEqual(serviceDependencies({ image: 'nginx' }), []);
 	});
 });
@@ -193,7 +193,7 @@ describe('requiredServices', function () {
 		assert.deepStrictEqual([...selected].sort(), ['api', 'db', 'web']);
 	});
 
-	it('returns an empty set when the app service is missing', () => {
+	it('returns an empty set when the app service is missing', function () {
 		assert.deepStrictEqual(
 			[...requiredServices({ db: { image: 'postgres' } }, 'web')],
 			[],
@@ -440,21 +440,19 @@ describe('preview create', function () {
 		]);
 	});
 
-	it('fails when service-name is not present', () => {
-		assert.throws(
-			() =>
-				rewriteComposeForPreview(
-					{ services: { web: { image: 'nginx' } } },
-					{
-						appName: 'example',
-						serviceName: 'api',
-						tag: 'abc1234',
-						prNumber: '42',
-						repoOwner: 'wajeht',
-					},
-				),
-			REGEX_MISSING_SERVICE,
-		);
+	it('fails when service-name is not present', function () {
+		assert.throws(function () {
+			return rewriteComposeForPreview(
+				{ services: { web: { image: 'nginx' } } },
+				{
+					appName: 'example',
+					serviceName: 'api',
+					tag: 'abc1234',
+					prNumber: '42',
+					repoOwner: 'wajeht',
+				},
+			);
+		}, REGEX_MISSING_SERVICE);
 	});
 
 	it('keeps the app service and its dependencies only', function () {
@@ -726,33 +724,27 @@ describe('preview access rules', function () {
 			),
 			null,
 		);
-		assert.throws(
-			() =>
-				resolveInheritedAccess(
-					tinyauthRules(app('unknown.example.com').services),
-					env,
-				),
-			REGEX_MISSING_RULE,
-		);
-		assert.throws(
-			() =>
-				resolveInheritedAccess(
-					tinyauthRules({
-						...app().services,
-						users: app('users.example.com').services.demo,
-					}),
-					env,
-				),
-			REGEX_DIFFERENT_ACCESS,
-		);
-		assert.throws(
-			() =>
-				resolveInheritedAccess(tinyauthRules(app().services), {
-					...env,
-					TINYAUTH_APPS_ADMIN_OAUTH_GROUPS: undefined,
+		assert.throws(function () {
+			return resolveInheritedAccess(
+				tinyauthRules(app('unknown.example.com').services),
+				env,
+			);
+		}, REGEX_MISSING_RULE);
+		assert.throws(function () {
+			return resolveInheritedAccess(
+				tinyauthRules({
+					...app().services,
+					users: app('users.example.com').services.demo,
 				}),
-			REGEX_INVALID_ACCESS,
-		);
+				env,
+			);
+		}, REGEX_DIFFERENT_ACCESS);
+		assert.throws(function () {
+			return resolveInheritedAccess(tinyauthRules(app().services), {
+				...env,
+				TINYAUTH_APPS_ADMIN_OAUTH_GROUPS: undefined,
+			});
+		}, REGEX_INVALID_ACCESS);
 	});
 	it('fails closed for default allow or rolling updates', function () {
 		assert.throws(
@@ -762,16 +754,11 @@ describe('preview access rules', function () {
 				),
 			REGEX_DEFAULT_DENY,
 		);
-		assert.throws(
-			() =>
-				parseAuthEnvironment(
-					PREVIEW_CONFIG.replace(
-						'rolling_update: false',
-						'rolling_update: true',
-					),
-				),
-			REGEX_RECREATION,
-		);
+		assert.throws(function () {
+			return parseAuthEnvironment(
+				PREVIEW_CONFIG.replace('rolling_update: false', 'rolling_update: true'),
+			);
+		}, REGEX_RECREATION);
 	});
 	it('handles inherited auth, explicit admin, public transitions, and cleanup after a missing stack', async function () {
 		const cwd = process.cwd();
@@ -902,17 +889,15 @@ describe('preview cleanup', function () {
 describe('preview input boundaries', function () {
 	it('rejects unsafe deletion targets before touching files', async function () {
 		for (const prNumber of ['../42', '0', '-1']) {
-			await assert.rejects(
-				() =>
-					main([
-						'--action',
-						'cleanup',
-						'--app-path',
-						'apps/demo',
-						`--pr-number=${prNumber}`,
-					]),
-				REGEX_INVALID_PR_NUMBER,
-			);
+			await assert.rejects(function () {
+				return main([
+					'--action',
+					'cleanup',
+					'--app-path',
+					'apps/demo',
+					`--pr-number=${prNumber}`,
+				]);
+			}, REGEX_INVALID_PR_NUMBER);
 		}
 		await assert.rejects(
 			() =>
@@ -938,25 +923,23 @@ describe('preview input boundaries', function () {
 	});
 });
 
-describe('preview CLI', () => {
+describe('preview CLI', function () {
 	it('validates the action and creation-only arguments', async function () {
 		await assert.rejects(() => main([]), REGEX_INVALID_ACTION);
 		await assert.rejects(
 			() => main(['--action', 'invalid']),
 			REGEX_INVALID_ACTION,
 		);
-		await assert.rejects(
-			() =>
-				main([
-					'--action',
-					'create',
-					'--app-path',
-					'apps/demo',
-					'--pr-number',
-					'42',
-				]),
-			REGEX_REQUIRED_SERVICE,
-		);
+		await assert.rejects(function () {
+			return main([
+				'--action',
+				'create',
+				'--app-path',
+				'apps/demo',
+				'--pr-number',
+				'42',
+			]);
+		}, REGEX_REQUIRED_SERVICE);
 		await assert.rejects(
 			() => main(['--action', 'cleanup', '--app-path', 'apps/demo']),
 			REGEX_REQUIRED_PR,

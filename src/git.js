@@ -3,8 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-const REGEX_MISSING_PATH = /did not match any files/;
-
 function runGit(args) {
 	console.log(`$ git ${args.join(' ')}`);
 	execFileSync('git', args, { stdio: 'inherit' });
@@ -24,15 +22,16 @@ function commitChanges(paths, allFiles, message) {
 		runGit(['add', '-A']);
 	} else {
 		for (const selectedPath of paths) {
-			try {
-				execFileSync('git', ['add', selectedPath], {
-					stdio: ['ignore', 'pipe', 'pipe'],
-				});
-			} catch (error) {
-				// A missing path is normal after cleanup; do not hide other staging failures.
-				if (!REGEX_MISSING_PATH.test(String(error.stderr))) {
-					throw error;
-				}
+			// Skip a path already removed by cleanup while still staging tracked deletions.
+			const changes = readGit([
+				'add',
+				'--dry-run',
+				'--ignore-missing',
+				'--',
+				selectedPath,
+			]);
+			if (changes) {
+				runGit(['add', '--', selectedPath]);
 			}
 		}
 	}
@@ -42,7 +41,7 @@ function commitChanges(paths, allFiles, message) {
 		console.log('No changes to commit');
 		return false;
 	} catch (error) {
-		if (error.status !== 1) {
+		if (!(error instanceof Error) || error.status !== 1) {
 			throw error;
 		}
 	}

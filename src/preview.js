@@ -185,7 +185,7 @@ export function resolveInheritedAccess(rules, env) {
 			throw new Error('Protected router has no exact Host rule');
 		}
 		for (const [, host] of routerHosts) {
-			const keys = Object.keys(env).filter((key) => {
+			const keys = Object.keys(env).filter(function (key) {
 				return key.endsWith('_CONFIG_DOMAIN') && env[key] === host;
 			});
 			if (keys.length !== 1) {

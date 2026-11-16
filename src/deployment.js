@@ -95,10 +95,11 @@ export function isDeploymentCurrent(expected, actual, tempPath, auth = false) {
 		function readTinyauthSettings(ref) {
 			return runGit(['show', `${ref}:${AUTH_PATH}`])
 				.split('\n')
-				.filter((line) => {
+				.filter(function (line) {
+					const setting = line.trimStart();
 					return (
-						!line.trim().startsWith('TINYAUTH_APPS_PREVIEW') ||
-						line.trim().startsWith(ownKey)
+						!setting.startsWith('TINYAUTH_APPS_PREVIEW') ||
+						setting.startsWith(ownKey)
 					);
 				})
 				.join('\n');

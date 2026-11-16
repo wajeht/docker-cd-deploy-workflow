@@ -38,7 +38,7 @@ function createFetchStub(responses) {
 function mockFetch(t, fetchStub) {
 	const previous = globalThis.fetch;
 	globalThis.fetch = fetchStub;
-	t.after(() => {
+	t.after(function () {
 		globalThis.fetch = previous;
 	});
 }
@@ -188,20 +188,18 @@ describe('deployment', function () {
 		]);
 		mockFetch(t, fetchStub);
 
-		await assert.rejects(
-			() =>
-				main([
-					'--token',
-					'token',
-					'--repo',
-					'wajeht/app',
-					'--action',
-					'cleanup',
-					'--environment',
-					'temp/pr-1',
-				]),
-			REGEX_GITHUB_FAILURE,
-		);
+		await assert.rejects(function () {
+			return main([
+				'--token',
+				'token',
+				'--repo',
+				'wajeht/app',
+				'--action',
+				'cleanup',
+				'--environment',
+				'temp/pr-1',
+			]);
+		}, REGEX_GITHUB_FAILURE);
 	});
 
 	it('rejects unknown deployment actions without making a request', async function (t) {
@@ -210,8 +208,8 @@ describe('deployment', function () {
 		});
 		for (const action of ['invalid', 'constructor', 'toString']) {
 			await assert.rejects(
-				() =>
-					main([
+				function () {
+					return main([
 						'--token',
 						'test',
 						'--repo',
@@ -220,7 +218,8 @@ describe('deployment', function () {
 						'pr-42',
 						'--action',
 						action,
-					]),
+					]);
+				},
 				{ message: `Unknown action: ${action}` },
 			);
 		}
@@ -244,30 +243,34 @@ describe('deployment', function () {
 			return Response.json({ success: true, data: ready });
 		});
 		await waitForPreview('apps/demo-pr-42', options);
-		await assert.rejects(
-			() =>
-				waitForPreview('apps/demo-pr-42', {
-					...options,
-					matches: () => false,
-				}),
-			REGEX_TIMEOUT,
-		);
+		await assert.rejects(function () {
+			return waitForPreview('apps/demo-pr-42', {
+				...options,
+				matches: () => false,
+			});
+		}, REGEX_TIMEOUT);
 		for (const data of [
 			{ ...ready, lastDeploy: { status: 'failed' } },
 			{ ...ready, health: { ...ready.health, starting: 1 } },
 		]) {
-			globalThis.fetch = async () => Response.json({ success: true, data });
+			globalThis.fetch = async function () {
+				return Response.json({ success: true, data });
+			};
 			await assert.rejects(
 				() => waitForPreview('apps/demo-pr-42', options),
 				REGEX_TIMEOUT,
 			);
 		}
-		globalThis.fetch = async () => new Response('<html>login</html>');
+		globalThis.fetch = async function () {
+			return new Response('<html>login</html>');
+		};
 		await assert.rejects(
 			() => waitForPreview('apps/demo-pr-42', options),
 			REGEX_TIMEOUT,
 		);
-		globalThis.fetch = async () => new Response('', { status: 401 });
+		globalThis.fetch = async function () {
+			return new Response('', { status: 401 });
+		};
 		await assert.rejects(
 			() => waitForPreview('apps/demo-pr-42', options),
 			REGEX_AUTHENTICATION,

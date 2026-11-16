@@ -27,6 +27,7 @@ function writeFakeGit(binDir) {
 			"import fs from 'node:fs';",
 			'const args = process.argv.slice(2);',
 			'fs.appendFileSync(process.env.GIT_LOG, `${JSON.stringify(args)}\\n`);',
+			"if (args[0] === 'add' && args.includes('--dry-run')) console.log('changes');",
 			"if (args.join(' ') === 'diff --staged --quiet' && process.env.GIT_DIFF_ERROR === 'true') process.exit(2);",
 			"if (args.join(' ') === 'diff --staged --quiet' && process.env.GIT_DIFF_HAS_CHANGES === 'true') {",
 			'  process.exit(1);',
@@ -90,7 +91,8 @@ describe('git', function () {
 		assert.deepStrictEqual(calls, [
 			['config', 'user.name', 'github-actions[bot]'],
 			['config', 'user.email', 'github-actions[bot]@users.noreply.github.com'],
-			['add', 'apps/demo'],
+			['add', '--dry-run', '--ignore-missing', '--', 'apps/demo'],
+			['add', '--', 'apps/demo'],
 			['diff', '--staged', '--quiet'],
 			['commit', '-m', 'chore: deploy demo'],
 			['push'],
@@ -116,7 +118,8 @@ describe('git', function () {
 		assert.deepStrictEqual(calls, [
 			['config', 'user.name', 'github-actions[bot]'],
 			['config', 'user.email', 'github-actions[bot]@users.noreply.github.com'],
-			['add', 'apps/demo'],
+			['add', '--dry-run', '--ignore-missing', '--', 'apps/demo'],
+			['add', '--', 'apps/demo'],
 			['diff', '--staged', '--quiet'],
 		]);
 	});
@@ -137,7 +140,7 @@ describe('git', function () {
 		]);
 	});
 
-	it('does not commit when the staged diff command fails', () => {
+	it('does not commit when the staged diff command fails', function () {
 		assert.throws(() =>
 			runGitPush(['--paths', 'apps/demo', '--message', 'preview'], {
 				GIT_DIFF_ERROR: 'true',
@@ -145,7 +148,7 @@ describe('git', function () {
 		);
 	});
 
-	it('requires paths or all', async () => {
+	it('requires paths or all', async function () {
 		await assert.rejects(
 			() => main(['--message', 'chore: deploy demo']),
 			REGEX_REQUIRED_PATHS,
