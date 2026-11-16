@@ -22,19 +22,19 @@ Node.js 26 ESM scripts. YAML parsing uses `js-yaml`.
 
 Each script exports its functions for tests and runs its CLI only when invoked directly. Tests live beside each module as `<name>.test.js`.
 
-`preview.js --action create` requires `--app-path`, `--pr-number`, `--service-name`, `--tag`, and `--repo-owner`. It also accepts `--auth-middleware` and `--app-repo-path`. Cleanup requires only `--app-path` and `--pr-number`. App paths must be direct children of an `apps` directory; absolute paths are accepted and normalized. PR numbers must be positive integers. Both actions emit the canonical preview directory as `temp-path` through `GITHUB_OUTPUT`; workflows stage that output rather than rebuilding the path.
+`preview.js --action create` requires `--app-path`, `--pr-number`, `--service-name`, `--tag`, and `--repo-owner`. It also accepts `--auth-middleware` and `--app-repo-path`. Cleanup requires only `--app-path` and `--pr-number`. App paths must be direct children of an `apps` directory. Absolute paths are accepted and normalized. PR numbers must be positive integers. Both actions emit the canonical preview directory as `temp-path` through `GITHUB_OUTPUT`.
 
-`git.js` accepts repeated `--paths` arguments or `--all`, plus `--message`. Preview workflows explicitly select the preview directory and Tinyauth Compose file so both changes are committed together.
+Both preview workflows pass `--message` to publish the preview directory and Tinyauth Compose file together. On a concurrent push, the preview operation runs again from the latest Home Ops `main`. Without `--message`, `preview.js` only writes the local files. The standalone `git.js` CLI accepts repeated `--paths` arguments or `--all`, plus `--message`.
 
 ## Secrets
 
 | Secret | Required by | Description |
 |--------|-------------|-------------|
 | `GH_TOKEN` | All workflows | GitHub PAT with `repo` and `packages` scope |
-| `DOCKER_CD_URL`, `DOCKER_CD_API_SECRET` | Tinyauth preview deploys | HTTPS docker-cd API origin and bearer token for readiness checks |
+| `DOCKER_CD_URL`, `DOCKER_CD_API_SECRET` | All preview deploys | HTTPS Docker-CD API origin and bearer token for readiness checks |
 
 ## Release Coordination
 
 Published workflows currently check out scripts from this repository's `main` branch. Older workflow pins still use the previous script paths, so renaming entrypoints requires a coordinated upgrade.
 
-Pause caller deployment workflows before merging this refactor. Merge and release it, update production deploy and both preview workflow pins in every caller, then resume. Do not merge and leave callers on the old workflow entrypoints. The Tinyauth cutover also requires the preview secrets and access checks described in [Temp Deploys](temp-deploy.md#rollout).
+Pause caller deployment workflows before merging this refactor. Merge and release it, update production deploy and both preview workflow pins in every caller, then resume. Configure the preview secrets and run the access checks described in [Temp Deploys](temp-deploy.md#rollout).

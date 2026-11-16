@@ -18,8 +18,10 @@ Keep preview creation and cleanup together. Keep Git operations independent of a
 ## Workflows
 
 - `deploy.yaml`: resolve the image digest, run `image.js`, then `git.js`. Production tracking uses the native GitHub environment.
-- `temp-deploy.yaml`: request a deployment, run `preview.js --action create`, commit through `git.js`, then verify and report readiness through `deployment.js`.
-- `temp-cleanup.yaml`: run `preview.js --action cleanup`, commit through `git.js`, then clean up the GitHub deployment.
+- `temp-deploy.yaml`: request a deployment, publish with `preview.js --action create --message`, then verify and report readiness through `deployment.js`.
+- `temp-cleanup.yaml`: publish removal with `preview.js --action cleanup --message`, then clean up the GitHub deployment.
+
+Preview create and cleanup commit the stack and auth rule together using `git.js`. If another push advances Home Ops `main`, retry by regenerating the change on that revision. Verify the preview's deployed revision and container health in Docker-CD before reporting success. Protected previews also check Tinyauth.
 
 Preview creation keeps the selected service and recursive `depends_on` services. It rewrites image tags, router names, hostnames, and bind mounts, removes unused networks/volumes and `container_name`, and writes `x-docker-cd.rolling_update: false`. PR `.env.sops` is copied as `.env.sops.override`.
 

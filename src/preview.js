@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import yaml from 'js-yaml';
 import { createHash } from 'node:crypto';
+import { commitAndPush } from './git.js';
 
 const REGEX_TINYAUTH_SERVICE = /^  tinyauth:\n(?:(?: {4}.*|\s*)\n)*/m;
 const REGEX_ROUTER_MIDDLEWARES =
@@ -535,50 +536,14 @@ export function rewriteComposeForPreview(doc, options) {
 	};
 }
 
-export async function main(argv = process.argv.slice(2)) {
-	const { values: args } = parseArgs({
-		args: argv,
-		options: {
-			action: { type: 'string' },
-			'app-path': { type: 'string' },
-			'service-name': { type: 'string' },
-			tag: { type: 'string' },
-			'pr-number': { type: 'string' },
-			'repo-owner': { type: 'string' },
-			'app-repo-path': { type: 'string' },
-			'auth-middleware': { type: 'string' },
-		},
-	});
-	if (!['create', 'cleanup'].includes(args.action)) {
-		throw new Error('--action must be create or cleanup');
-	}
-	for (const key of ['app-path', 'pr-number']) {
-		if (!args[key]) {
-			throw new Error(`Missing required arg: --${key}`);
-		}
-	}
-	if (args.action === 'cleanup') {
-		const tempPath = removePreview(args['app-path'], args['pr-number']);
-		const outputFile = process.env.GITHUB_OUTPUT;
-		if (outputFile) {
-			fs.appendFileSync(outputFile, `temp-path=${tempPath}\n`);
-		}
-		return;
-	}
-	for (const key of ['service-name', 'tag', 'repo-owner']) {
-		if (!args[key]) {
-			throw new Error(`Missing required arg: --${key}`);
-		}
-	}
+function createPreview(args, appPath, tempPath) {
 	const appRepoPath = args['app-repo-path'];
-	const appPath = validatePreviewTarget(args['app-path'], args['pr-number']);
 	const serviceName = args['service-name'];
 	const tag = args['tag'];
 	const prNumber = args['pr-number'];
 	const repoOwner = args['repo-owner'];
 	const authMiddleware = args['auth-middleware'];
 	const appName = path.basename(appPath);
-	const tempPath = `${appPath}-pr-${prNumber}`;
 
 	fs.rmSync(tempPath, { recursive: true, force: true });
 	fs.cpSync(appPath, tempPath, { recursive: true });
@@ -629,10 +594,62 @@ export async function main(argv = process.argv.slice(2)) {
 
 	console.log(`Created temp stack at ${tempPath}`);
 	console.log(`URL: ${result.url}`);
+	return result.url;
+}
 
+export async function main(argv = process.argv.slice(2)) {
+	const { values: args } = parseArgs({
+		args: argv,
+		options: {
+			action: { type: 'string' },
+			'app-path': { type: 'string' },
+			'service-name': { type: 'string' },
+			tag: { type: 'string' },
+			'pr-number': { type: 'string' },
+			'repo-owner': { type: 'string' },
+			'app-repo-path': { type: 'string' },
+			'auth-middleware': { type: 'string' },
+			message: { type: 'string' },
+		},
+	});
+	if (!['create', 'cleanup'].includes(args.action)) {
+		throw new Error('--action must be create or cleanup');
+	}
+	const required = ['app-path', 'pr-number'];
+	if (args.action === 'create') {
+		required.push('service-name', 'tag', 'repo-owner');
+	}
+	for (const key of required) {
+		if (!args[key]) {
+			throw new Error(`Missing required arg: --${key}`);
+		}
+	}
+	if (args.message === '') {
+		throw new Error('--message must not be empty');
+	}
+	const prNumber = args['pr-number'];
+	const appPath = validatePreviewTarget(args['app-path'], prNumber);
+	const tempPath = `${appPath}-pr-${prNumber}`;
+	function prepare() {
+		if (args.action === 'cleanup') {
+			removePreview(appPath, prNumber);
+			return;
+		}
+		return createPreview(args, appPath, tempPath);
+	}
+
+	const url = args.message
+		? commitAndPush({
+				paths: [tempPath, AUTH_PATH],
+				message: args.message,
+				prepare,
+			})
+		: prepare();
 	const outputFile = process.env.GITHUB_OUTPUT;
 	if (outputFile) {
-		fs.appendFileSync(outputFile, `url=${result.url}\n`);
+		if (url) {
+			fs.appendFileSync(outputFile, `url=${url}\n`);
+		}
 		fs.appendFileSync(outputFile, `temp-path=${tempPath}\n`);
 	}
 }

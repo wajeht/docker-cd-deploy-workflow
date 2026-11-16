@@ -5,40 +5,23 @@ import { parseArgs } from 'node:util';
 
 const REGEX_MISSING_PATH = /did not match any files/;
 
-export async function main(argv = process.argv.slice(2)) {
-	const { values: args } = parseArgs({
-		args: argv,
-		options: {
-			message: { type: 'string' },
-			paths: { type: 'string', multiple: true },
-			all: { type: 'boolean' },
-		},
-	});
-	if (!args['message']) {
-		throw new Error('Missing required arg: --message');
-	}
-	function runCommand(cmd, cmdArgs) {
-		console.log(`$ ${cmd} ${cmdArgs.join(' ')}`);
-		return execFileSync(cmd, cmdArgs, { stdio: 'inherit' });
-	}
+function runGit(args) {
+	console.log(`$ git ${args.join(' ')}`);
+	execFileSync('git', args, { stdio: 'inherit' });
+}
 
-	if (!args['paths'] && !args['all']) {
-		throw new Error('Missing required arg: --paths or --all');
-	}
+function readGit(args) {
+	return execFileSync('git', args, { encoding: 'utf8' }).trim();
+}
 
-	const message = args['message'];
-	const paths = args['paths'];
-	const allFiles = args['all'] === true;
+function fetchMain() {
+	runGit(['fetch', 'origin', 'main']);
+	return readGit(['rev-parse', 'FETCH_HEAD']);
+}
 
-	runCommand('git', ['config', 'user.name', 'github-actions[bot]']);
-	runCommand('git', [
-		'config',
-		'user.email',
-		'github-actions[bot]@users.noreply.github.com',
-	]);
-
+function commitChanges(paths, allFiles, message) {
 	if (allFiles) {
-		runCommand('git', ['add', '-A']);
+		runGit(['add', '-A']);
 	} else {
 		for (const selectedPath of paths) {
 			try {
@@ -57,26 +40,74 @@ export async function main(argv = process.argv.slice(2)) {
 	try {
 		execFileSync('git', ['diff', '--staged', '--quiet']);
 		console.log('No changes to commit');
-		return;
+		return false;
 	} catch (error) {
 		if (error.status !== 1) {
 			throw error;
 		}
 	}
 
-	runCommand('git', ['commit', '-m', message]);
+	runGit(['commit', '-m', message]);
+	return true;
+}
 
-	for (let i = 1; i <= 3; i++) {
+export function commitAndPush({ paths, allFiles = false, message, prepare }) {
+	let base;
+	if (prepare) {
+		if (readGit(['status', '--porcelain', '--untracked-files=no'])) {
+			throw new Error('Preparing changes requires a clean checkout');
+		}
+		base = fetchMain();
+		runGit(['merge', '--ff-only', base]);
+		if (readGit(['rev-parse', 'HEAD']) !== base) {
+			throw new Error('Checkout has local commits ahead of origin/main');
+		}
+	}
+
+	runGit(['config', 'user.name', 'github-actions[bot]']);
+	runGit([
+		'config',
+		'user.email',
+		'github-actions[bot]@users.noreply.github.com',
+	]);
+	const pushArgs = prepare
+		? ['push', 'origin', 'HEAD:refs/heads/main']
+		: ['push'];
+	let result;
+
+	for (let attempt = 1; attempt <= 3; attempt++) {
+		if (prepare) {
+			result = prepare();
+		}
+		if (
+			(prepare || attempt === 1) &&
+			!commitChanges(paths, allFiles, message)
+		) {
+			return result;
+		}
 		try {
-			runCommand('git', ['push']);
-			return;
-		} catch {
-			if (i === 3) {
-				throw new Error('Push failed after 3 attempts');
+			runGit(pushArgs);
+			return result;
+		} catch (error) {
+			if (attempt === 3) {
+				throw new Error('Push failed after 3 attempts', { cause: error });
 			}
-			console.log(`Push failed (attempt ${i}/3), rebasing...`);
+			if (prepare) {
+				const latest = fetchMain();
+				if (latest === base) {
+					throw new Error('Push failed without a change to origin/main', {
+						cause: error,
+					});
+				}
+				// Reapply the operation to preserve concurrent edits to shared files.
+				console.log('Main changed during push. Preparing changes again.');
+				runGit(['reset', '--keep', latest]);
+				base = latest;
+				continue;
+			}
+			console.log(`Push failed (attempt ${attempt}/3), rebasing...`);
 			try {
-				runCommand('git', ['pull', '--rebase', 'origin', 'main']);
+				runGit(['pull', '--rebase', 'origin', 'main']);
 			} catch {
 				throw new Error(
 					'Concurrent changes conflict; rerun the workflow from the latest Home Ops main',
@@ -84,6 +115,28 @@ export async function main(argv = process.argv.slice(2)) {
 			}
 		}
 	}
+}
+
+export async function main(argv = process.argv.slice(2)) {
+	const { values: args } = parseArgs({
+		args: argv,
+		options: {
+			message: { type: 'string' },
+			paths: { type: 'string', multiple: true },
+			all: { type: 'boolean' },
+		},
+	});
+	if (!args.message) {
+		throw new Error('Missing required arg: --message');
+	}
+	if (!args.paths && !args.all) {
+		throw new Error('Missing required arg: --paths or --all');
+	}
+	commitAndPush({
+		paths: args.paths,
+		allFiles: args.all,
+		message: args.message,
+	});
 }
 
 if (

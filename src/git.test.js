@@ -7,18 +7,11 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { main } from './git.js';
-import {
-	updateAccess,
-	AUTH_PATH,
-	previewId,
-	parseAuthEnvironment,
-} from './preview.js';
+import { AUTH_PATH, previewId, parseAuthEnvironment } from './preview.js';
 import { isDeploymentCurrent } from './deployment.js';
 
-const REGEX_STAGE_PATH = /--paths "([^"]+)"/;
-
 const REGEX_REQUIRED_PATHS = /Missing required arg: --paths or --all/;
-const REGEX_PUSH_CONFLICT = /Concurrent changes conflict/;
+const REGEX_RETRY = /Preparing changes again/;
 
 const SCRIPT_PATH = path.join(
 	path.dirname(fileURLToPath(import.meta.url)),
@@ -159,144 +152,14 @@ describe('git', function () {
 		);
 	});
 
-	it('stages the preview and Tinyauth config in the same commit', function () {
-		const calls = runGitPush(
-			[
-				'--paths',
-				'apps/demo-pr-42',
-				'--paths',
-				'apps/tinyauth/docker-compose.yml',
-				'--message',
-				'preview',
-			],
-			{ GIT_DIFF_HAS_CHANGES: 'true' },
-		);
-		assert.deepStrictEqual(
-			calls.filter(([command]) => command === 'add'),
-			[
-				['add', 'apps/demo-pr-42'],
-				['add', 'apps/tinyauth/docker-compose.yml'],
-			],
-		);
-	});
-
-	it('fails safely on a concurrent ACL conflict and preserves both rules after rerun', async function () {
+	it('retries preview creation and cleanup against concurrent auth changes', function () {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-conflict-'));
-		const cwd = process.cwd();
-		function runGit(directory, ...args) {
-			return execFileSync('git', args, {
-				cwd: directory,
-				encoding: 'utf8',
-				stdio: 'pipe',
-			}).trim();
-		}
-		const first = path.join(dir, 'first');
-		const second = path.join(dir, 'second');
-		const config =
-			'x-docker-cd:\n  rolling_update: false\nservices:\n  tinyauth:\n    environment:\n      TINYAUTH_AUTH_ACLS_POLICY: deny\n';
-		function rule(pr) {
-			return {
-				appPath: 'apps/demo',
-				prNumber: pr,
-				hostname: `pr-${pr}-demo.example.com`,
-				access: { group: 'admins', whitelist: '/.+/' },
-			};
-		}
-		function pushPreview() {
-			return execFileSync(
-				process.execPath,
-				[SCRIPT_PATH, '--paths', AUTH_PATH, '--message', 'preview'],
-				{ cwd: first, stdio: 'pipe' },
-			);
-		}
-		try {
-			runGit(dir, 'init', '--bare', '--initial-branch=main', 'remote.git');
-			runGit(dir, 'clone', path.join(dir, 'remote.git'), first);
-			runGit(first, 'config', 'user.name', 'Test');
-			runGit(first, 'config', 'user.email', 'test@example.com');
-			fs.mkdirSync(path.join(first, 'apps/tinyauth'), { recursive: true });
-			fs.writeFileSync(path.join(first, AUTH_PATH), config);
-			runGit(first, 'add', '.');
-			runGit(first, 'commit', '-m', 'initial');
-			runGit(first, 'push', 'origin', 'main');
-			runGit(dir, 'clone', path.join(dir, 'remote.git'), second);
-			runGit(second, 'config', 'user.name', 'Test');
-			runGit(second, 'config', 'user.email', 'test@example.com');
-			const other = updateAccess(config, rule('43'));
-			fs.writeFileSync(path.join(second, AUTH_PATH), other);
-			runGit(second, 'add', '.');
-			runGit(second, 'commit', '-m', 'preview 43');
-			runGit(second, 'push', 'origin', 'main');
-			fs.writeFileSync(
-				path.join(first, AUTH_PATH),
-				updateAccess(config, rule('42')),
-			);
-			assert.throws(pushPreview, REGEX_PUSH_CONFLICT);
-			assert.strictEqual(
-				runGit(first, 'show', `origin/main:${AUTH_PATH}`),
-				other.trim(),
-			);
-			runGit(first, 'rebase', '--abort');
-			runGit(first, 'reset', '--hard', 'origin/main');
-			const previous = runGit(first, 'rev-parse', 'HEAD');
-			fs.writeFileSync(
-				path.join(first, AUTH_PATH),
-				updateAccess(other, rule('42')),
-			);
-			pushPreview();
-			const current = runGit(first, 'rev-parse', 'HEAD');
-			const env = parseAuthEnvironment(
-				runGit(first, 'show', `HEAD:${AUTH_PATH}`),
-			);
-			for (const pr of ['42', '43']) {
-				assert.strictEqual(
-					env[`TINYAUTH_APPS_${previewId('apps/demo', pr)}_OAUTH_GROUPS`],
-					'admins',
-				);
-			}
-			process.chdir(first);
-			assert.strictEqual(
-				isDeploymentCurrent(previous, current, 'apps/demo-pr-43', true),
-				true,
-			);
-			assert.strictEqual(
-				isDeploymentCurrent(previous, current, 'apps/demo-pr-42', true),
-				false,
-			);
-			assert.strictEqual(
-				isDeploymentCurrent(current, previous, 'apps/demo-pr-42', true),
-				false,
-			);
-			fs.appendFileSync(AUTH_PATH, '# changed global auth configuration\n');
-			runGit(first, 'add', AUTH_PATH);
-			runGit(first, 'commit', '-m', 'change auth configuration');
-			assert.strictEqual(
-				isDeploymentCurrent(
-					current,
-					runGit(first, 'rev-parse', 'HEAD'),
-					'apps/demo-pr-42',
-					true,
-				),
-				false,
-			);
-		} finally {
-			process.chdir(cwd);
-			fs.rmSync(dir, { recursive: true, force: true });
-		}
-	});
-	it('commits preview creation and cleanup using workflow output paths', function () {
-		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-workflow-'));
 		const checkout = path.join(dir, 'checkout');
+		const competitor = path.join(dir, 'competitor');
 		const remote = path.join(dir, 'remote.git');
 		const outputFile = path.join(dir, 'output');
-		const source = path.dirname(SCRIPT_PATH);
-		const workflowDir = path.resolve(source, '..', '.github/workflows');
-		const deploy = yaml.load(
-			fs.readFileSync(path.join(workflowDir, 'temp-deploy.yaml'), 'utf8'),
-		);
-		const cleanup = yaml.load(
-			fs.readFileSync(path.join(workflowDir, 'temp-cleanup.yaml'), 'utf8'),
-		);
+		const raceFile = path.join(dir, 'race');
+		const root = path.resolve(path.dirname(SCRIPT_PATH), '..');
 
 		function runGit(directory, ...args) {
 			return execFileSync('git', args, {
@@ -305,122 +168,159 @@ describe('git', function () {
 				stdio: 'pipe',
 			}).trim();
 		}
-		function runPreview(action, appPath) {
-			fs.writeFileSync(outputFile, '');
-			const args = [
-				'--action',
-				action,
-				'--app-path',
-				appPath,
-				'--pr-number',
-				'42',
-			];
-			if (action === 'create') {
-				args.push(
-					'--service-name',
-					'demo',
-					'--tag',
-					'new',
-					'--repo-owner',
-					'test',
-				);
-			}
-			execFileSync(
-				process.execPath,
-				[path.join(source, 'preview.js'), ...args],
-				{
-					cwd: checkout,
-					env: { ...process.env, GITHUB_OUTPUT: outputFile },
-					stdio: 'pipe',
-				},
+		function publish(workflowName, appPath, concurrentPr) {
+			const workflow = yaml.load(
+				fs.readFileSync(
+					path.join(root, '.github/workflows', workflowName),
+					'utf8',
+				),
 			);
-			for (const line of fs.readFileSync(outputFile, 'utf8').split('\n')) {
-				if (line.startsWith('temp-path=')) {
-					return line.slice('temp-path='.length);
-				}
-			}
-			assert.fail('Preview action did not emit its canonical path');
-		}
-		function commitWorkflow(workflow, appPath, previewPath) {
 			const job = Object.values(workflow.jobs)[0];
-			const previewStep = job.steps.find((step) =>
+			const step = job.steps.find((step) =>
 				step.run?.includes('src/preview.js'),
 			);
-			const commitStep = job.steps.find(
-				(step) => step.name === 'Commit and push',
-			);
-			const command = commitStep.run
+			const command = step.run
 				.replaceAll('${{ inputs.app-path }}', appPath)
+				.replaceAll('${{ inputs.service-name }}', 'demo')
+				.replaceAll('${{ inputs.tag }}', 'preview')
+				.replaceAll('${{ inputs.auth-middleware }}', 'tinyauth@file')
 				.replaceAll('${{ github.event.pull_request.number }}', '42')
-				.replaceAll(
-					`\${{ steps.${previewStep.id}.outputs.temp-path }}`,
-					previewPath,
-				);
-			const match = command.match(REGEX_STAGE_PATH);
-			assert.ok(match, 'Workflow must explicitly select the preview path');
-			execFileSync(
-				process.execPath,
-				[
-					SCRIPT_PATH,
-					'--paths',
-					match[1],
-					'--paths',
-					AUTH_PATH,
-					'--message',
-					'preview lifecycle',
-				],
-				{
-					cwd: checkout,
-					stdio: 'pipe',
+				.replaceAll('${{ github.repository_owner }}', 'test')
+				.replaceAll('${{ github.event.repository.name }}', 'demo');
+			fs.writeFileSync(outputFile, '');
+			if (concurrentPr) {
+				fs.writeFileSync(raceFile, concurrentPr);
+			}
+			const log = execFileSync('bash', ['-e', '-c', command], {
+				cwd: checkout,
+				env: {
+					...process.env,
+					GITHUB_OUTPUT: outputFile,
+					RACE_FILE: raceFile,
+					COMPETITOR: competitor,
+					NODE_BINARY: process.execPath,
+					PREVIEW_SCRIPT: path.join(root, 'src/preview.js'),
 				},
-			);
+				encoding: 'utf8',
+				stdio: 'pipe',
+			});
+			if (concurrentPr) {
+				assert.match(log, REGEX_RETRY);
+			}
+			return fs.readFileSync(outputFile, 'utf8');
+		}
+		function ruleGroup(pr) {
+			const config = runGit(remote, 'show', `HEAD:${AUTH_PATH}`);
+			return parseAuthEnvironment(config)[
+				`TINYAUTH_APPS_${previewId('apps/demo', pr)}_OAUTH_GROUPS`
+			];
 		}
 
 		try {
 			runGit(dir, 'init', '--bare', '--initial-branch=main', remote);
 			runGit(dir, 'clone', remote, checkout);
-			runGit(checkout, 'config', 'core.fsmonitor', 'false');
-			runGit(checkout, 'config', 'user.name', 'Test');
-			runGit(checkout, 'config', 'user.email', 'test@example.com');
 			fs.mkdirSync(path.join(checkout, 'apps/demo'), { recursive: true });
+			fs.mkdirSync(path.join(checkout, 'apps/tinyauth'));
 			fs.writeFileSync(
 				path.join(checkout, 'apps/demo/docker-compose.yml'),
 				'services:\n  demo:\n    image: ghcr.io/test/demo:old\n    labels:\n      - traefik.http.routers.demo.rule=Host(`demo.example.com`)\n',
 			);
+			fs.writeFileSync(
+				path.join(checkout, AUTH_PATH),
+				'x-docker-cd:\n  rolling_update: false\nservices:\n  tinyauth:\n    environment:\n      TINYAUTH_AUTH_ACLS_POLICY: deny\n',
+			);
 			runGit(checkout, 'add', 'apps');
-			runGit(checkout, 'commit', '-m', 'initial');
-			runGit(checkout, 'push', '-u', 'origin', 'main');
+			runGit(
+				checkout,
+				'-c',
+				'user.name=Test',
+				'-c',
+				'user.email=test@example.com',
+				'commit',
+				'-m',
+				'initial',
+			);
+			runGit(checkout, 'push', 'origin', 'main');
+			runGit(dir, 'clone', remote, competitor);
+			const scripts = path.join(checkout, '.deploy-workflow');
+			fs.mkdirSync(scripts);
+			fs.cpSync(path.join(root, 'src'), path.join(scripts, 'src'), {
+				recursive: true,
+			});
+			fs.copyFileSync(
+				path.join(root, 'package.json'),
+				path.join(scripts, 'package.json'),
+			);
+			fs.symlinkSync(
+				path.join(root, 'node_modules'),
+				path.join(scripts, 'node_modules'),
+				'dir',
+			);
+			fs.writeFileSync(
+				path.join(checkout, '.git/hooks/pre-push'),
+				`#!/bin/sh
+if [ -f "$RACE_FILE" ]; then
+  pr=$(cat "$RACE_FILE")
+  rm "$RACE_FILE"
+  cd "$COMPETITOR" || exit 1
+  unset GITHUB_OUTPUT
+  exec "$NODE_BINARY" "$PREVIEW_SCRIPT" --action create --app-path apps/demo \\
+    --pr-number "$pr" --service-name demo --tag preview --repo-owner test \\
+    --auth-middleware tinyauth@file --message "concurrent preview"
+fi
+`,
+				{ mode: 0o755 },
+			);
 
-			for (const appPath of ['apps/demo/', 'apps/demo/.']) {
-				const previewPath = runPreview('create', appPath);
-				commitWorkflow(deploy, appPath, previewPath);
+			const previewPath = path.join(
+				fs.realpathSync(checkout),
+				'apps/demo-pr-42',
+			);
+			assert.strictEqual(
+				publish('temp-deploy.yaml', 'apps/demo/', '43'),
+				`url=https://pr-42-demo.example.com\ntemp-path=${previewPath}\n`,
+			);
+			assert.strictEqual(ruleGroup('42'), 'admins');
+			assert.strictEqual(ruleGroup('43'), 'admins');
+			assert.strictEqual(
+				runGit(remote, 'ls-tree', '--name-only', 'HEAD', 'apps/demo-pr-42'),
+				'apps/demo-pr-42',
+			);
+			const created = runGit(remote, 'rev-parse', 'HEAD');
+
+			assert.strictEqual(
+				publish('temp-cleanup.yaml', 'apps/demo/.', '44'),
+				`temp-path=${previewPath}\n`,
+			);
+			assert.strictEqual(ruleGroup('42'), undefined);
+			assert.strictEqual(ruleGroup('43'), 'admins');
+			assert.strictEqual(ruleGroup('44'), 'admins');
+			assert.strictEqual(
+				runGit(remote, 'ls-tree', '--name-only', 'HEAD', 'apps/demo-pr-42'),
+				'',
+			);
+
+			const cleaned = runGit(remote, 'rev-parse', 'HEAD');
+			publish('temp-cleanup.yaml', 'apps/demo');
+			assert.strictEqual(runGit(remote, 'rev-parse', 'HEAD'), cleaned);
+
+			const cwd = process.cwd();
+			try {
+				process.chdir(checkout);
 				assert.strictEqual(
-					runGit(
-						remote,
-						'ls-tree',
-						'-r',
-						'--name-only',
-						'HEAD',
-						'--',
-						'apps/demo-pr-42',
-					),
-					'apps/demo-pr-42/docker-compose.yml',
+					isDeploymentCurrent(created, cleaned, 'apps/demo-pr-43', true),
+					true,
 				);
-				assert.strictEqual(runPreview('cleanup', appPath), previewPath);
-				commitWorkflow(cleanup, appPath, previewPath);
 				assert.strictEqual(
-					runGit(
-						remote,
-						'ls-tree',
-						'-r',
-						'--name-only',
-						'HEAD',
-						'--',
-						'apps/demo-pr-42',
-					),
-					'',
+					isDeploymentCurrent(created, cleaned, 'apps/demo-pr-42', true),
+					false,
 				);
-				assert.strictEqual(runPreview('cleanup', appPath), previewPath);
+				assert.strictEqual(
+					isDeploymentCurrent(cleaned, created, 'apps/demo-pr-43', true),
+					false,
+				);
+			} finally {
+				process.chdir(cwd);
 			}
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });

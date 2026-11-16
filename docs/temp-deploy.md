@@ -32,7 +32,7 @@ Close PR or remove the last temp deploy label
 1. Wildcard DNS for `*.jaw.dev`
 2. Wildcard TLS cert in Traefik for `*.jaw.dev`
 3. `GH_TOKEN` secret with `repo` and `packages` scope
-4. For Home Ops with Tinyauth: `DOCKER_CD_URL` (HTTPS API origin) and `DOCKER_CD_API_SECRET` secrets in the caller repo, forwarded to the deploy workflow
+4. `DOCKER_CD_URL` (HTTPS API origin) and `DOCKER_CD_API_SECRET` secrets in the caller repo, forwarded to the preview deploy workflow
 5. `temp-deploy` and `temp-deploy-with-auth` labels:
 
 ```bash
@@ -171,7 +171,7 @@ jobs:
 
 Everything else on kept services is preserved. If a temp deploy needs a database, Redis, or another local service, declare it in `depends_on`.
 
-Cleanup uses `preview.js --action cleanup` with `app-path` and `pr-number`. It removes the preview directory and its access rule, including when the directory is already gone. Both actions commit through `git.js`; deployment status is handled by `deployment.js`.
+Cleanup uses `preview.js --action cleanup` with `app-path` and `pr-number`. It removes the preview directory and its access rule, including when the directory is already gone. Both workflows pass a commit message to publish their changes together.
 
 ## Custom Env Overrides
 
@@ -207,9 +207,9 @@ with:
 
 If omitted, temp deploys keep production middleware and its Pocket ID group and email rule. Explicit `tinyauth@file` previews require the `admins` group. Missing or conflicting inherited rules stop preview creation.
 
-`preview.js` owns creation and cleanup, including adding or removing only that preview's exact-domain OAuth rule. `git.js` commits the stack and rule together. Conflicting concurrent edits fail safely; rerun the workflow from the latest Home Ops main.
+The preview stack and its exact-domain OAuth rule are committed together. If another push advances Home Ops `main`, the workflow regenerates the change from the latest revision and tries again, up to three attempts.
 
-`deployment.js` checks docker-cd's deployed revisions and container health before marking a Tinyauth preview ready. Home Ops must use `rolling_update: false` to recreate Tinyauth after environment changes. A timeout fails the deployment; a login redirect does not count as readiness.
+`deployment.js` verifies the preview's deployed revision and container health in Docker-CD for both public and protected previews. Protected previews also wait for Tinyauth to apply the preview rule. Home Ops uses `rolling_update: false` to recreate Tinyauth after environment changes. A timeout marks the deployment failed.
 
 For per-PR auth, gate the input from labels:
 
@@ -248,4 +248,4 @@ Recommended label behavior:
 
 ## Rollout
 
-Follow [release coordination](reference.md#release-coordination). In `bang`, `jaw.dev`, and `videos`, change the auth input to `tinyauth@file` and pass the two docker-cd secrets to the deploy workflow. Verify Pocket ID access for `admins` and `users`, public previews, and cleanup.
+Follow [release coordination](reference.md#release-coordination). Pass the two Docker-CD secrets from every preview deploy caller. In `bang`, `jaw.dev`, and `videos`, change the auth input to `tinyauth@file`. Verify Pocket ID access for `admins` and `users`, public previews, and cleanup.

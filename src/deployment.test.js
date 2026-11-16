@@ -3,7 +3,8 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { main, waitForTinyauth } from './deployment.js';
+import { execFileSync } from 'node:child_process';
+import { main, waitForPreview } from './deployment.js';
 
 const REGEX_GITHUB_FAILURE =
 	/GitHub API GET \/deployments\?environment=temp%2Fpr-1&per_page=100: 500$/;
@@ -125,40 +126,6 @@ describe('deployment', function () {
 		);
 	});
 
-	it('marks a deployment successful without polling when health check is skipped', async function (t) {
-		const fetchStub = createFetchStub([{}]);
-		mockFetch(t, fetchStub);
-
-		await main([
-			'--token',
-			'token',
-			'--repo',
-			'wajeht/app',
-			'--action',
-			'deploy',
-			'--environment',
-			'temp/pr-1',
-			'--deployment-id',
-			'123',
-			'--url',
-			'https://pr-1-app.jaw.dev',
-			'--skip-health-check',
-			'true',
-		]);
-
-		assert.deepStrictEqual(fetchStub.calls, [
-			{
-				url: 'https://api.github.com/repos/wajeht/app/deployments/123/statuses',
-				method: 'POST',
-				body: {
-					state: 'success',
-					environment_url: 'https://pr-1-app.jaw.dev',
-					description: 'Deploy committed, docker-cd will pick it up',
-				},
-			},
-		]);
-	});
-
 	it('cleans up all deployments for an environment', async function (t) {
 		const fetchStub = createFetchStub([
 			{ json: [{ id: 1 }, { id: 2 }] },
@@ -266,16 +233,20 @@ describe('deployment', function () {
 			lastDeploy: { status: 'synced', commitSHA: 'a'.repeat(40) },
 			health: { total: 1, running: 1, healthy: 1, starting: 0, unhealthy: 0 },
 		};
-		const options = { attempts: 1, matches: () => true };
+		const options = {
+			protectedPreview: true,
+			attempts: 1,
+			matches: () => true,
+		};
 		mockFetch(t, async function (url, request) {
 			assert.strictEqual(request.redirect, 'error');
 			assert.strictEqual(request.headers.Authorization, 'Bearer test');
 			return Response.json({ success: true, data: ready });
 		});
-		await waitForTinyauth('apps/demo-pr-42', options);
+		await waitForPreview('apps/demo-pr-42', options);
 		await assert.rejects(
 			() =>
-				waitForTinyauth('apps/demo-pr-42', {
+				waitForPreview('apps/demo-pr-42', {
 					...options,
 					matches: () => false,
 				}),
@@ -287,37 +258,83 @@ describe('deployment', function () {
 		]) {
 			globalThis.fetch = async () => Response.json({ success: true, data });
 			await assert.rejects(
-				() => waitForTinyauth('apps/demo-pr-42', options),
+				() => waitForPreview('apps/demo-pr-42', options),
 				REGEX_TIMEOUT,
 			);
 		}
 		globalThis.fetch = async () => new Response('<html>login</html>');
 		await assert.rejects(
-			() => waitForTinyauth('apps/demo-pr-42', options),
+			() => waitForPreview('apps/demo-pr-42', options),
 			REGEX_TIMEOUT,
 		);
 		globalThis.fetch = async () => new Response('', { status: 401 });
 		await assert.rejects(
-			() => waitForTinyauth('apps/demo-pr-42', options),
+			() => waitForPreview('apps/demo-pr-42', options),
 			REGEX_AUTHENTICATION,
 		);
 	});
 
-	it('parses folded middleware labels and records protected deployment failures', async function (t) {
+	it('reports readiness only after Docker-CD checks the preview and its auth rule', async function (t) {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-readiness-'));
+		const cwd = process.cwd();
 		mockDockerCdEnvironment(t);
-		t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-		fs.writeFileSync(
-			path.join(dir, 'docker-compose.yml'),
-			`services:
+		t.after(function () {
+			process.chdir(cwd);
+			fs.rmSync(dir, { recursive: true, force: true });
+		});
+		process.chdir(dir);
+
+		function runGit(args) {
+			return execFileSync('git', args, {
+				encoding: 'utf8',
+				stdio: 'pipe',
+			}).trim();
+		}
+		function commitPreview(compose) {
+			fs.writeFileSync('apps/demo-pr-42/docker-compose.yml', compose);
+			runGit(['add', 'apps']);
+			runGit([
+				'-c',
+				'user.name=Test',
+				'-c',
+				'user.email=test@example.com',
+				'commit',
+				'-m',
+				'preview',
+			]);
+			return {
+				success: true,
+				data: {
+					sync: 'synced',
+					lastDeploy: {
+						status: 'synced',
+						commitSHA: runGit(['rev-parse', 'HEAD']),
+					},
+					health: {
+						total: 1,
+						running: 1,
+						healthy: 1,
+						starting: 0,
+						unhealthy: 0,
+					},
+				},
+			};
+		}
+
+		runGit(['init']);
+		fs.mkdirSync('apps/demo-pr-42', { recursive: true });
+		const protectedProject = commitPreview(`services:
   web:
     labels:
       traefik.http.routers.web.middlewares: >-
         tinyauth@file
-`,
-		);
-		const fetchStub = createFetchStub([{ ok: false, status: 401 }, {}]);
-		mockFetch(t, fetchStub);
+`);
+		const protectedFetch = createFetchStub([
+			{ json: protectedProject },
+			{ ok: false, status: 401 },
+			{},
+		]);
+		mockFetch(t, protectedFetch);
 		const args = [
 			'--token',
 			'test',
@@ -332,22 +349,29 @@ describe('deployment', function () {
 			'--url',
 			'https://pr-42.example.com',
 			'--app-path',
-			dir,
-			'--skip-health-check',
-			'true',
+			'apps/demo-pr-42',
 		];
-		await assert.rejects(() => main(args), REGEX_AUTHENTICATION);
-		assert.strictEqual(fetchStub.calls[1].body.state, 'failure');
 
-		// Comments mentioning the middleware must not turn a public preview into a protected one.
-		fs.writeFileSync(
-			path.join(dir, 'docker-compose.yml'),
-			'services:\n  web:\n    # middlewares=tinyauth@file\n    image: nginx\n',
+		await assert.rejects(() => main(args), REGEX_AUTHENTICATION);
+		assert.strictEqual(
+			new URL(protectedFetch.calls[1].url).pathname,
+			'/api/projects/tinyauth',
 		);
-		const publicFetch = createFetchStub([{}]);
+		assert.strictEqual(protectedFetch.calls[2].body.state, 'failure');
+
+		const publicProject = commitPreview(`services:
+  web:
+    # middlewares=tinyauth@file
+    image: nginx
+`);
+		const publicFetch = createFetchStub([{ json: publicProject }, {}]);
 		globalThis.fetch = publicFetch;
 		await main(args);
-		assert.strictEqual(publicFetch.calls.length, 1);
-		assert.strictEqual(publicFetch.calls[0].body.state, 'success');
+		assert.strictEqual(publicFetch.calls.length, 2);
+		assert.strictEqual(
+			new URL(publicFetch.calls[0].url).pathname,
+			'/api/projects/demo-pr-42',
+		);
+		assert.strictEqual(publicFetch.calls[1].body.state, 'success');
 	});
 });

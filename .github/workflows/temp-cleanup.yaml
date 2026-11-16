@@ -54,18 +54,11 @@ jobs:
         run: cd .deploy-workflow && npm ci
 
       - name: Remove temp stack
-        id: cleanup
         run: |
           node .deploy-workflow/src/preview.js \
             --action cleanup \
             --app-path "${{ inputs.app-path }}" \
-            --pr-number "${{ github.event.pull_request.number }}"
-
-      - name: Commit and push
-        run: |
-          node .deploy-workflow/src/git.js \
-            --paths "${{ steps.cleanup.outputs.temp-path }}" \
-            --paths apps/tinyauth/docker-compose.yml \
+            --pr-number "${{ github.event.pull_request.number }}" \
             --message "chore(${{ github.event.repository.name }}): remove temp deploy pr-${{ github.event.pull_request.number }}"
 
       - name: Cleanup GitHub deployment
