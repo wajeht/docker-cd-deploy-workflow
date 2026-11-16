@@ -14,12 +14,23 @@ App repo builds image to ghcr.io
 - `temp-deploy.yaml` creates temporary PR environments, with optional Traefik auth.
 - `temp-cleanup.yaml` removes temporary PR environments.
 
+## Scripts
+
+- `image.js` updates production images.
+- `preview.js` creates and removes preview files and their access rules.
+- `git.js` commits and pushes the requested files.
+- `deployment.js` tracks GitHub deployments and checks readiness.
+
+Docker-CD deploys containers after these scripts update Home Ops.
+
 ## Use
+
+Replace `RELEASE_COMMIT` with the released workflow commit. See [release coordination](docs/reference.md#release-coordination) when upgrading callers.
 
 ```yaml
 jobs:
   deploy:
-    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@v0.0.26
+    uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@RELEASE_COMMIT
     with:
       app-path: apps/your-app
       service-name: your-app
@@ -31,7 +42,7 @@ jobs:
 For PR previews, app repos can use:
 
 - `temp-deploy` for a normal temp app with production middleware labels
-- `temp-deploy-with-auth` plus `auth-middleware: oauth2-admin@file` for an auth-protected temp app
+- `temp-deploy-with-auth` plus `auth-middleware: tinyauth@file` for an auth-protected temp app
 
 ## Docs
 

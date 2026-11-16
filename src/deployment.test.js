@@ -3,15 +3,21 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { main } from './deployment.js';
+import { execFileSync } from 'node:child_process';
+import { main, waitForPreview } from './deployment.js';
 
-function fakeFetch(responses) {
+const REGEX_GITHUB_FAILURE =
+	/GitHub API GET \/deployments\?environment=temp%2Fpr-1&per_page=100: 500$/;
+const REGEX_TIMEOUT = /Timed out/;
+const REGEX_AUTHENTICATION = /authentication/;
+
+function createFetchStub(responses) {
 	const calls = [];
-	async function fetch(url, options = {}) {
-		const response = responses.shift() || {};
+	async function requestResponse(url, options = {}) {
+		const response = responses.shift() ?? {};
 		calls.push({
 			url,
-			method: options.method || 'GET',
+			method: options.method ?? 'GET',
 			body: options.body ? JSON.parse(options.body) : null,
 		});
 		return {
@@ -25,24 +31,44 @@ function fakeFetch(responses) {
 			},
 		};
 	}
-	fetch.calls = calls;
-	return fetch;
+	requestResponse.calls = calls;
+	return requestResponse;
 }
 
-function withFetch(t, fetch) {
+function mockFetch(t, fetchStub) {
 	const previous = globalThis.fetch;
-	globalThis.fetch = fetch;
-	t.after(() => {
+	globalThis.fetch = fetchStub;
+	t.after(function () {
 		globalThis.fetch = previous;
 	});
 }
 
-function withGithubOutput(t) {
+function mockDockerCdEnvironment(t) {
+	const values = {
+		DOCKER_CD_URL: 'https://cd.example.com',
+		DOCKER_CD_API_SECRET: 'test',
+	};
+	for (const [key, value] of Object.entries(values)) {
+		const previous = process.env[key];
+		process.env[key] = value;
+		t.after(function () {
+			if (previous === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = previous;
+			}
+		});
+	}
+}
+
+function mockGitHubOutput(t) {
 	const previous = process.env.GITHUB_OUTPUT;
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'));
+	const dir = fs.mkdtempSync(
+		path.join(os.tmpdir(), 'docker-cd-deploy-workflow-'),
+	);
 	const outputFile = path.join(dir, 'output');
 	process.env.GITHUB_OUTPUT = outputFile;
-	t.after(() => {
+	t.after(function () {
 		if (previous === undefined) {
 			delete process.env.GITHUB_OUTPUT;
 		} else {
@@ -53,11 +79,11 @@ function withGithubOutput(t) {
 	return outputFile;
 }
 
-describe('deployment', () => {
-	it('requests a deployment and writes the deployment id output', async (t) => {
-		const fetch = fakeFetch([{ json: { id: 123 } }, {}]);
-		const outputFile = withGithubOutput(t);
-		withFetch(t, fetch);
+describe('deployment', function () {
+	it('requests a deployment and writes the deployment id output', async function (t) {
+		const fetchStub = createFetchStub([{ json: { id: 123 } }, {}]);
+		const outputFile = mockGitHubOutput(t);
+		mockFetch(t, fetchStub);
 
 		await main([
 			'--token',
@@ -72,7 +98,7 @@ describe('deployment', () => {
 			'feature',
 		]);
 
-		assert.deepStrictEqual(fetch.calls, [
+		assert.deepStrictEqual(fetchStub.calls, [
 			{
 				url: 'https://api.github.com/repos/wajeht/app/deployments',
 				method: 'POST',
@@ -94,12 +120,21 @@ describe('deployment', () => {
 				},
 			},
 		]);
-		assert.strictEqual(fs.readFileSync(outputFile, 'utf8'), 'deployment-id=123\n');
+		assert.strictEqual(
+			fs.readFileSync(outputFile, 'utf8'),
+			'deployment-id=123\n',
+		);
 	});
 
-	it('marks a deployment successful without polling when health check is skipped', async (t) => {
-		const fetch = fakeFetch([{}]);
-		withFetch(t, fetch);
+	it('cleans up all deployments for an environment', async function (t) {
+		const fetchStub = createFetchStub([
+			{ json: [{ id: 1 }, { id: 2 }] },
+			{},
+			{},
+			{},
+			{},
+		]);
+		mockFetch(t, fetchStub);
 
 		await main([
 			'--token',
@@ -107,37 +142,12 @@ describe('deployment', () => {
 			'--repo',
 			'wajeht/app',
 			'--action',
-			'deploy',
+			'cleanup',
 			'--environment',
 			'temp/pr-1',
-			'--deployment-id',
-			'123',
-			'--url',
-			'https://pr-1-app.jaw.dev',
-			'--skip-health-check',
-			'true',
 		]);
 
-		assert.deepStrictEqual(fetch.calls, [
-			{
-				url: 'https://api.github.com/repos/wajeht/app/deployments/123/statuses',
-				method: 'POST',
-				body: {
-					state: 'success',
-					environment_url: 'https://pr-1-app.jaw.dev',
-					description: 'Deploy committed, docker-cd will pick it up',
-				},
-			},
-		]);
-	});
-
-	it('cleans up all deployments for an environment', async (t) => {
-		const fetch = fakeFetch([{ json: [{ id: 1 }, { id: 2 }] }, {}, {}, {}, {}]);
-		withFetch(t, fetch);
-
-		await main(['--token', 'token', '--repo', 'wajeht/app', '--action', 'cleanup', '--environment', 'temp/pr-1']);
-
-		assert.deepStrictEqual(fetch.calls, [
+		assert.deepStrictEqual(fetchStub.calls, [
 			{
 				url: 'https://api.github.com/repos/wajeht/app/deployments?environment=temp%2Fpr-1&per_page=100',
 				method: 'GET',
@@ -172,13 +182,199 @@ describe('deployment', () => {
 		]);
 	});
 
-	it('surfaces GitHub API errors', async (t) => {
-		const fetch = fakeFetch([{ ok: false, status: 500, text: 'nope' }]);
-		withFetch(t, fetch);
+	it('reports GitHub status without exposing upstream response bodies', async function (t) {
+		const fetchStub = createFetchStub([
+			{ ok: false, status: 500, text: 'secret response details' },
+		]);
+		mockFetch(t, fetchStub);
 
+		await assert.rejects(function () {
+			return main([
+				'--token',
+				'token',
+				'--repo',
+				'wajeht/app',
+				'--action',
+				'cleanup',
+				'--environment',
+				'temp/pr-1',
+			]);
+		}, REGEX_GITHUB_FAILURE);
+	});
+
+	it('rejects unknown deployment actions without making a request', async function (t) {
+		mockFetch(t, async function unexpectedRequest() {
+			assert.fail('Unknown actions must not make HTTP requests');
+		});
+		for (const action of ['invalid', 'constructor', 'toString']) {
+			await assert.rejects(
+				function () {
+					return main([
+						'--token',
+						'test',
+						'--repo',
+						'wajeht/app',
+						'--environment',
+						'pr-42',
+						'--action',
+						action,
+					]);
+				},
+				{ message: `Unknown action: ${action}` },
+			);
+		}
+	});
+
+	it('checks deployed state instead of accepting a login page', async function (t) {
+		mockDockerCdEnvironment(t);
+		const ready = {
+			sync: 'synced',
+			lastDeploy: { status: 'synced', commitSHA: 'a'.repeat(40) },
+			health: { total: 1, running: 1, healthy: 1, starting: 0, unhealthy: 0 },
+		};
+		const options = {
+			protectedPreview: true,
+			attempts: 1,
+			matches: () => true,
+		};
+		mockFetch(t, async function (url, request) {
+			assert.strictEqual(request.redirect, 'error');
+			assert.strictEqual(request.headers.Authorization, 'Bearer test');
+			return Response.json({ success: true, data: ready });
+		});
+		await waitForPreview('apps/demo-pr-42', options);
+		await assert.rejects(function () {
+			return waitForPreview('apps/demo-pr-42', {
+				...options,
+				matches: () => false,
+			});
+		}, REGEX_TIMEOUT);
+		for (const data of [
+			{ ...ready, lastDeploy: { status: 'failed' } },
+			{ ...ready, health: { ...ready.health, starting: 1 } },
+		]) {
+			globalThis.fetch = async function () {
+				return Response.json({ success: true, data });
+			};
+			await assert.rejects(
+				() => waitForPreview('apps/demo-pr-42', options),
+				REGEX_TIMEOUT,
+			);
+		}
+		globalThis.fetch = async function () {
+			return new Response('<html>login</html>');
+		};
 		await assert.rejects(
-			() => main(['--token', 'token', '--repo', 'wajeht/app', '--action', 'cleanup', '--environment', 'temp/pr-1']),
-			/GitHub API GET \/deployments\?environment=temp%2Fpr-1&per_page=100: 500 nope/,
+			() => waitForPreview('apps/demo-pr-42', options),
+			REGEX_TIMEOUT,
 		);
+		globalThis.fetch = async function () {
+			return new Response('', { status: 401 });
+		};
+		await assert.rejects(
+			() => waitForPreview('apps/demo-pr-42', options),
+			REGEX_AUTHENTICATION,
+		);
+	});
+
+	it('reports readiness only after Docker-CD checks the preview and its auth rule', async function (t) {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-readiness-'));
+		const cwd = process.cwd();
+		mockDockerCdEnvironment(t);
+		t.after(function () {
+			process.chdir(cwd);
+			fs.rmSync(dir, { recursive: true, force: true });
+		});
+		process.chdir(dir);
+
+		function runGit(args) {
+			return execFileSync('git', args, {
+				encoding: 'utf8',
+				stdio: 'pipe',
+			}).trim();
+		}
+		function commitPreview(compose) {
+			fs.writeFileSync('apps/demo-pr-42/docker-compose.yml', compose);
+			runGit(['add', 'apps']);
+			runGit([
+				'-c',
+				'user.name=Test',
+				'-c',
+				'user.email=test@example.com',
+				'commit',
+				'-m',
+				'preview',
+			]);
+			return {
+				success: true,
+				data: {
+					sync: 'synced',
+					lastDeploy: {
+						status: 'synced',
+						commitSHA: runGit(['rev-parse', 'HEAD']),
+					},
+					health: {
+						total: 1,
+						running: 1,
+						healthy: 1,
+						starting: 0,
+						unhealthy: 0,
+					},
+				},
+			};
+		}
+
+		runGit(['init']);
+		fs.mkdirSync('apps/demo-pr-42', { recursive: true });
+		const protectedProject = commitPreview(`services:
+  web:
+    labels:
+      traefik.http.routers.web.middlewares: >-
+        tinyauth@file
+`);
+		const protectedFetch = createFetchStub([
+			{ json: protectedProject },
+			{ ok: false, status: 401 },
+			{},
+		]);
+		mockFetch(t, protectedFetch);
+		const args = [
+			'--token',
+			'test',
+			'--repo',
+			'wajeht/app',
+			'--action',
+			'deploy',
+			'--environment',
+			'pr-42',
+			'--deployment-id',
+			'123',
+			'--url',
+			'https://pr-42.example.com',
+			'--app-path',
+			'apps/demo-pr-42',
+		];
+
+		await assert.rejects(() => main(args), REGEX_AUTHENTICATION);
+		assert.strictEqual(
+			new URL(protectedFetch.calls[1].url).pathname,
+			'/api/projects/tinyauth',
+		);
+		assert.strictEqual(protectedFetch.calls[2].body.state, 'failure');
+
+		const publicProject = commitPreview(`services:
+  web:
+    # middlewares=tinyauth@file
+    image: nginx
+`);
+		const publicFetch = createFetchStub([{ json: publicProject }, {}]);
+		globalThis.fetch = publicFetch;
+		await main(args);
+		assert.strictEqual(publicFetch.calls.length, 2);
+		assert.strictEqual(
+			new URL(publicFetch.calls[0].url).pathname,
+			'/api/projects/demo-pr-42',
+		);
+		assert.strictEqual(publicFetch.calls[1].body.state, 'success');
 	});
 });
