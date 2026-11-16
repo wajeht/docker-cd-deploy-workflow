@@ -32,7 +32,3 @@ Both preview workflows pass `--message` to publish the preview directory and Tin
 |--------|-------------|-------------|
 | `GH_TOKEN` | All workflows | GitHub PAT with `repo` and `packages` scope |
 | `DOCKER_CD_URL`, `DOCKER_CD_API_SECRET` | All preview deploys | HTTPS Docker-CD API origin and bearer token for readiness checks |
-
-## Release Coordination
-
-Workflows pinned before `v0.0.29` fetch scripts from `main` and can fail because the script names changed. Upgrade your deploy and preview workflow pins to `v0.0.29` or later.

@@ -25,7 +25,7 @@ Docker-CD deploys containers after these scripts update Home Ops.
 
 ## Use
 
-Replace `RELEASE_COMMIT` with the released workflow commit. See [release coordination](docs/reference.md#release-coordination) when upgrading callers.
+Replace `RELEASE_COMMIT` with the released workflow commit.
 
 ```yaml
 jobs:
