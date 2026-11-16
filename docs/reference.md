@@ -32,9 +32,3 @@ Both preview workflows pass `--message` to publish the preview directory and Tin
 |--------|-------------|-------------|
 | `GH_TOKEN` | All workflows | GitHub PAT with `repo` and `packages` scope |
 | `DOCKER_CD_URL`, `DOCKER_CD_API_SECRET` | All preview deploys | HTTPS Docker-CD API origin and bearer token for readiness checks |
-
-## Release Coordination
-
-Older workflow pins still fetch scripts from this repository's `main` branch. When this change merges, callers using the old script names can fail until they upgrade.
-
-After release, update the production deploy, preview deploy, and preview cleanup pins wherever they are used. You can pause deployments during the upgrade to avoid failed runs. Configure the preview secrets and run the access checks described in [Temp Deploys](temp-deploy.md#rollout).

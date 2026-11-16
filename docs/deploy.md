@@ -6,7 +6,7 @@
 
 ## Usage
 
-Replace `RELEASE_COMMIT` with the released workflow commit. Follow [release coordination](reference.md#release-coordination) when changing caller pins.
+Replace `RELEASE_COMMIT` with the released workflow commit.
 
 ```yaml
 jobs:

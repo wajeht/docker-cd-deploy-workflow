@@ -76,10 +76,6 @@ This is a JavaScript CLI repository, with no `ctx`, `HttpError`, or TypeScript r
 - Update workflow invocations and docs when changing script names or CLI arguments.
 - Avoid unrelated formatting changes and extra dependencies.
 
-## Releases
-
-Published workflows currently check out scripts from `main`. Renaming entrypoints requires coordinated caller upgrades; see `docs/reference.md#release-coordination`. Creating a PR does not authorize a release or production cutover.
-
 ## Commits
 
 - Use short conventional commit messages.
@@ -90,4 +86,4 @@ Published workflows currently check out scripts from `main`. Renaming entrypoint
 - `README.md`: overview and quick start.
 - `docs/deploy.md`: production workflow usage.
 - `docs/temp-deploy.md`: preview setup, auth, and cleanup.
-- `docs/reference.md`: module responsibilities, CLI actions, secrets, and release coordination.
+- `docs/reference.md`: module responsibilities, CLI actions, and secrets.

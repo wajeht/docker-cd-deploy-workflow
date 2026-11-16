@@ -42,7 +42,7 @@ gh label create temp-deploy-with-auth
 
 ## Setup
 
-Replace `RELEASE_COMMIT` below with the released commit containing Tinyauth preview support. Add `pull_request` types to CI and append temp build/deploy jobs:
+Replace `RELEASE_COMMIT` below with the released workflow commit. Add `pull_request` types to CI and append temp build/deploy jobs:
 
 ```yaml
 name: CI
@@ -247,7 +247,3 @@ Recommended label behavior:
 | `runs-on` | No | `["ubuntu-latest"]` | Runner labels as a JSON array |
 | `home-ops-repo` | No | `wajeht/home-ops` | Target repo |
 | `app-path` | Yes | - | Base app path, like `apps/bang` |
-
-## Rollout
-
-Follow [release coordination](reference.md#release-coordination). Pass the two Docker-CD secrets from every preview deploy caller. In `bang`, `jaw.dev`, and `videos`, change the auth input to `tinyauth@file`. Verify Pocket ID access for `admins` and `users`, public previews, and cleanup.
