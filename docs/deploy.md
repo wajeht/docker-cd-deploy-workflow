@@ -52,4 +52,4 @@ The workflow uses native GitHub Actions `environment: production`, giving you:
 
 - a `production` entry in the repo Deployments sidebar
 - a clickable URL for the deployed app
-- serialized deploys via `concurrency: deploy-home-ops`
+- one run at a time in the shared `deploy-home-ops` queue, with up to 100 runs waiting

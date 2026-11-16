@@ -41,6 +41,7 @@ on:
 
 concurrency:
   group: deploy-home-ops
+  queue: max
   cancel-in-progress: false
 
 jobs:
