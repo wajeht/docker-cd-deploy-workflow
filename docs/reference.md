@@ -35,6 +35,4 @@ Both preview workflows pass `--message` to publish the preview directory and Tin
 
 ## Release Coordination
 
-Older workflow pins still fetch scripts from this repository's `main` branch. When this change merges, callers using the old script names can fail until they upgrade.
-
-After release, update the production deploy, preview deploy, and preview cleanup pins wherever they are used. You can pause deployments during the upgrade to avoid failed runs. Configure the preview secrets and run the access checks described in [Temp Deploys](temp-deploy.md#rollout).
+Workflows pinned before `v0.0.29` fetch scripts from `main` and can fail because the script names changed. Upgrade your deploy and preview workflow pins to `v0.0.29` or later.
