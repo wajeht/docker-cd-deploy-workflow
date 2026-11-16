@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import yaml from 'js-yaml';
+import { load } from 'js-yaml';
 import { main } from './git.js';
 import { AUTH_PATH, previewId, parseAuthEnvironment } from './preview.js';
 import { isDeploymentCurrent } from './deployment.js';
@@ -172,7 +172,7 @@ describe('git', function () {
 			}).trim();
 		}
 		function publish(workflowName, appPath, concurrentPr) {
-			const workflow = yaml.load(
+			const workflow = load(
 				fs.readFileSync(
 					path.join(root, '.github/workflows', workflowName),
 					'utf8',

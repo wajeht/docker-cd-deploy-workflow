@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import yaml from 'js-yaml';
+import { dump, load } from 'js-yaml';
 import { createHash } from 'node:crypto';
 import { commitAndPush } from './git.js';
 
@@ -153,14 +153,14 @@ export function tinyauthRules(services) {
 }
 
 export function isTinyauthPreview(tempPath) {
-	const doc = yaml.load(
+	const doc = load(
 		fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'),
 	);
 	return tinyauthRules(doc.services).length > 0;
 }
 
 export function parseAuthEnvironment(text) {
-	const doc = yaml.load(text);
+	const doc = load(text);
 	const env = doc?.services?.tinyauth?.environment;
 	if (!env || Array.isArray(env) || typeof env !== 'object') {
 		throw new Error('Tinyauth requires a mapping environment');
@@ -557,7 +557,7 @@ function createPreview(args, appPath, tempPath) {
 	}
 
 	const composePath = path.join(tempPath, 'docker-compose.yml');
-	const doc = yaml.load(fs.readFileSync(composePath, 'utf8'));
+	const doc = load(fs.readFileSync(composePath, 'utf8'));
 	const result = rewriteComposeForPreview(doc, {
 		appName,
 		serviceName,
@@ -585,7 +585,7 @@ function createPreview(args, appPath, tempPath) {
 
 	fs.writeFileSync(
 		composePath,
-		yaml.dump(tempComposeDoc, {
+		dump(tempComposeDoc, {
 			lineWidth: -1,
 			quotingType: '"',
 			forceQuotes: false,

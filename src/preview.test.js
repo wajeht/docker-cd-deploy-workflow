@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import yaml from 'js-yaml';
+import { dump, load } from 'js-yaml';
 import {
 	parseAuthEnvironment,
 	resolveInheritedAccess,
@@ -466,7 +466,7 @@ describe('preview create', function () {
 			fs.mkdirSync(appPath, { recursive: true });
 			fs.writeFileSync(
 				path.join(appPath, 'docker-compose.yml'),
-				yaml.dump({
+				dump({
 					'x-docker-cd': {
 						rolling_update: true,
 					},
@@ -522,7 +522,7 @@ describe('preview create', function () {
 				'wajeht',
 			]);
 
-			const rewritten = yaml.load(
+			const rewritten = load(
 				fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'),
 			);
 
@@ -570,7 +570,7 @@ describe('preview create', function () {
 			fs.mkdirSync(appPath, { recursive: true });
 			fs.writeFileSync(
 				path.join(appPath, 'docker-compose.yml'),
-				yaml.dump({
+				dump({
 					services: {
 						demo: {
 							image: 'ghcr.io/wajeht/demo:old',
@@ -602,7 +602,7 @@ describe('preview create', function () {
 				'oauth2-admin@file',
 			]);
 
-			const rewritten = yaml.load(
+			const rewritten = load(
 				fs.readFileSync(path.join(tempPath, 'docker-compose.yml'), 'utf8'),
 			);
 
@@ -769,7 +769,7 @@ describe('preview access rules', function () {
 			fs.mkdirSync('apps/demo', { recursive: true });
 			fs.writeFileSync('apps/tinyauth/docker-compose.yml', PREVIEW_CONFIG);
 			async function deployPreview(doc, middleware = '') {
-				fs.writeFileSync('apps/demo/docker-compose.yml', yaml.dump(doc));
+				fs.writeFileSync('apps/demo/docker-compose.yml', dump(doc));
 				return main([
 					'--action',
 					'create',
