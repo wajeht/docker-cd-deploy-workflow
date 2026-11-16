@@ -193,6 +193,10 @@ git commit -m "add temp deploy env overrides"
 The workflow copies `.env.sops` into the temp stack as `.env.sops.override`.
 docker-cd merges it over the home-ops base `.env.sops`.
 
+## Preview Readiness
+
+Both public and protected previews use the Docker-CD URL and API token to check the deployed revision and container health before GitHub marks the preview ready. Protected previews also wait for Tinyauth to apply their access rule. A timeout marks the deployment failed.
+
 ## Optional Auth
 
 Set `auth-middleware` to protect a temp PR site with an existing Traefik middleware:
@@ -207,9 +211,7 @@ with:
 
 If omitted, temp deploys keep production middleware and its Pocket ID group and email rule. Explicit `tinyauth@file` previews require the `admins` group. Missing or conflicting inherited rules stop preview creation.
 
-The preview stack and its exact-domain OAuth rule are committed together. If another push advances Home Ops `main`, the workflow regenerates the change from the latest revision and tries again, up to three attempts.
-
-`deployment.js` verifies the preview's deployed revision and container health in Docker-CD for both public and protected previews. Protected previews also wait for Tinyauth to apply the preview rule. Home Ops uses `rolling_update: false` to recreate Tinyauth after environment changes. A timeout marks the deployment failed.
+The preview stack and its exact-domain OAuth rule are committed together. If another push advances Home Ops `main`, the workflow regenerates the change from the latest revision and tries again, up to three attempts. Home Ops uses `rolling_update: false` to recreate Tinyauth after environment changes.
 
 For per-PR auth, gate the input from labels:
 

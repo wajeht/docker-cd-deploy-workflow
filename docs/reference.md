@@ -35,6 +35,6 @@ Both preview workflows pass `--message` to publish the preview directory and Tin
 
 ## Release Coordination
 
-Published workflows currently check out scripts from this repository's `main` branch. Older workflow pins still use the previous script paths, so renaming entrypoints requires a coordinated upgrade.
+Older workflow pins still fetch scripts from this repository's `main` branch. When this change merges, callers using the old script names can fail until they upgrade.
 
-Pause caller deployment workflows before merging this refactor. Merge and release it, update production deploy and both preview workflow pins in every caller, then resume. Configure the preview secrets and run the access checks described in [Temp Deploys](temp-deploy.md#rollout).
+After release, update the production deploy, preview deploy, and preview cleanup pins wherever they are used. You can pause deployments during the upgrade to avoid failed runs. Configure the preview secrets and run the access checks described in [Temp Deploys](temp-deploy.md#rollout).
